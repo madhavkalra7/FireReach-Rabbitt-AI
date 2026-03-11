@@ -1,202 +1,64 @@
-# FireReach Agent Documentation
+# FireReach Documentation
 
 ## Overview
 
-FireReach is an autonomous B2B outreach engine that uses AI agents to research companies, analyze fit against your Ideal Customer Profile (ICP), and send hyper-personalized cold emails — all automatically.
+FireReach is an autonomous B2B outreach engine that uses AI to research companies and send personalized cold emails.
+
+## Deployment Note
+
+**Important**: The application works perfectly on localhost. However, when deploying to **Vercel + Render free tier**, Gmail SMTP is blocked by the hosting providers.
+
+**Solutions**:
+1. **Deploy on Railway** - Railway does not block SMTP outbound connections
+2. **Use SendGrid API** - Replace Gmail SMTP with SendGrid email API
 
 ---
 
-## Logic Flow
-
-The FireReach agent operates in a strict sequential pipeline:
+## How It Works
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     USER INPUT                                   │
-│  • ICP (Ideal Customer Profile)                                 │
-│  • Target Company Name                                          │
-│  • Recipient Email                                              │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 1: SIGNAL HARVESTER                                       │
-│  ─────────────────────────                                      │
-│  • Queries SerpAPI for REAL, live data                         │
-│  • Searches: funding, hiring, news, tech stack                 │
-│  • Returns: SignalData object with factual information         │
-│                                                                 │
-│  WHY: Grounds all subsequent steps in real, verifiable data    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 2: RESEARCH ANALYST                                       │
-│  ────────────────────────                                       │
-│  • Takes SignalData + ICP as input                             │
-│  • Uses GPT-5.4 to analyze strategic fit                       │
-│  • Outputs: 2-paragraph Account Brief                          │
-│                                                                 │
-│  WHY: Creates context-rich analysis for email personalization  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 3: OUTREACH SENDER                                        │
-│  ───────────────────────                                        │
-│  • Takes Signals + Brief + ICP + Recipient                     │
-│  • GPT-5.4 generates personalized email (JSON response)        │
-│  • Email sent via Gmail SMTP (real send, not draft)            │
-│  • Returns: subject, body, sent status                         │
-│                                                                 │
-│  WHY: Ensures every email references actual signals            │
-└─────────────────────────────────────────────────────────────────┘
+User Input (ICP, Company, Email)
+           │
+           ▼
+┌─────────────────────────┐
+│  1. Signal Harvester    │  → SerpAPI searches for funding, hiring, news
+└─────────────────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  2. Research Analyst    │  → AI analyzes signals against ICP
+└─────────────────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  3. Outreach Sender     │  → AI writes email + sends via SMTP
+└─────────────────────────┘
 ```
-
-### Why This Sequence Matters
-
-1. **Signal-First Approach**: By harvesting signals BEFORE any AI generation, we ensure the agent never fabricates information. Every claim in the email is backed by real search results.
-
-2. **ICP Alignment**: The research analyst step explicitly connects company signals to your ICP, ensuring relevance and strategic fit.
-
-3. **Grounded Personalization**: The email writer receives both raw signals AND analyzed brief, enabling hyper-specific personalization that references actual facts.
 
 ---
 
-## Tool Schemas
+## API Endpoint
 
-### 1. tool_signal_harvester
+**POST** `/api/outreach`
 
-**Description**: Harvests real-time signals about a target company using SerpAPI Google searches.
-
-**Input Parameters**:
-| Parameter | Type   | Required | Description                          |
-|-----------|--------|----------|--------------------------------------|
-| company   | string | Yes      | Name of the target company to research |
-
-**Output Format** (SignalData):
 ```json
 {
-  "company": "string",
-  "funding": "string",
-  "hiring": "string",
-  "news": ["string", "string", "string"],
-  "tech_stack": ["string", "string"]
-}
-```
-
-**Example Output**:
-```json
-{
-  "company": "Vercel",
-  "funding": "Vercel raised $150M in Series D funding at a $2.5B valuation in May 2024, led by GV with participation from existing investors.",
-  "hiring": "Vercel is actively hiring for 47 open positions including Senior Frontend Engineers, Platform Engineers, and AI/ML specialists across their San Francisco and remote teams.",
-  "news": [
-    "Vercel launches v0 AI product: Revolutionary AI-powered development tool announced at Next.js Conf 2024",
-    "Next.js 15 released: Major performance improvements with new compiler and caching system",
-    "Vercel expands enterprise partnerships: New deals with Fortune 500 companies announced"
-  ],
-  "tech_stack": ["React", "Next.js", "TypeScript", "Vercel Edge", "Turborepo", "Node.js"]
-}
-```
-
-**Search Queries Executed**:
-1. `{company} funding 2024 2025`
-2. `{company} hiring jobs site:linkedin.com OR site:greenhouse.io`
-3. `{company} news announcement 2025`
-4. `{company} tech stack`
-
----
-
-### 2. tool_research_analyst
-
-**Description**: Analyzes harvested signals against the ICP and generates a strategic account brief.
-
-**Input Parameters**:
-| Parameter | Type   | Required | Description                             |
-|-----------|--------|----------|-----------------------------------------|
-| signals   | object | Yes      | SignalData object from signal_harvester |
-| icp       | string | Yes      | Ideal Customer Profile description      |
-
-**Output Format**:
-```json
-{
-  "account_brief": "string (2 paragraphs)"
-}
-```
-
-**Example Output**:
-```json
-{
-  "account_brief": "Vercel is experiencing explosive growth, having just closed a $150M Series D at a $2.5B valuation in May 2024. The company is aggressively scaling with 47 open engineering positions, signaling rapid team expansion. Their recent launch of v0, an AI-powered development tool, and Next.js 15 demonstrates heavy investment in cutting-edge technology. The engineering-heavy hiring surge suggests they're building complex systems at scale.\n\nThis growth trajectory creates urgent security training needs. With 47+ new engineers onboarding, Vercel faces the classic scale-up security challenge: rapid team growth outpacing security culture. Their AI product launch and enterprise expansion increase their attack surface and compliance requirements. Series D companies like Vercel typically prioritize developer productivity initially, creating gaps in security awareness that become critical as they move upmarket to enterprise clients."
+  "icp": "Your ideal customer profile",
+  "company": "Target company name",
+  "recipient_email": "email@example.com"
 }
 ```
 
 ---
 
-### 3. tool_outreach_automated_sender
-
-**Description**: Writes a hyper-personalized cold email using AI and sends it via Gmail SMTP.
-
-**Input Parameters**:
-| Parameter       | Type   | Required | Description                             |
-|-----------------|--------|----------|-----------------------------------------|
-| signals         | object | Yes      | SignalData object from signal_harvester |
-| account_brief   | string | Yes      | Account brief from research_analyst     |
-| icp             | string | Yes      | Ideal Customer Profile description      |
-| recipient_email | string | Yes      | Email address to send outreach to       |
-
-**Output Format**:
-```json
-{
-  "subject": "string",
-  "body": "string",
-  "sent": boolean,
-  "recipient": "string"
-}
-```
-
-**Example Output**:
-```json
-{
-  "subject": "47 new engineers = 47 new attack vectors?",
-  "body": "Hi,\n\nCaught the news about your 47 open engineering roles — that's serious scale-up energy. Having helped other Series D dev tools companies navigate this exact inflection point, I know the security training gap that rapid hiring creates.\n\nWhen you're shipping AI products like v0 and expanding enterprise contracts, every new engineer becomes a potential entry point. The playbook we've seen work: get ahead of it before your first enterprise security audit becomes a fire drill.\n\nWould a 15-min call to share what we learned from similar scale-ups be useful?\n\nBest,\n[Your name]",
-  "sent": true,
-  "recipient": "john@vercel.com"
-}
-```
-
----
-
-## System Prompt
-
-The agent operates with the following system prompt, which enforces strict data-grounded behavior:
+## Environment Variables
 
 ```
-You are FireReach, an autonomous B2B outreach agent. You operate with precision 
-and always ground your outreach in real, harvested data.
-
-Your persona: Strategic, efficient, data-driven. You never guess — you research first.
-
-Your constraints:
-1. ALWAYS call tool_signal_harvester first before any analysis
-2. ALWAYS call tool_research_analyst before writing any email
-3. ALWAYS call tool_outreach_automated_sender to send — never just draft
-4. Never fabricate signals — only use what tool_signal_harvester returns
-5. The email MUST reference specific signals (numbers, facts, names)
-6. Complete all 3 tool calls sequentially — never skip steps
+OPENAI_API_KEY=your_openai_key
+SERPAPI_KEY=your_serpapi_key
+SENDER_EMAIL=your_gmail@gmail.com
+SENDER_EMAIL_APP_PASSWORD=your_app_password
 ```
-
-### Constraint Explanations
-
-| Constraint | Purpose |
-|------------|---------|
-| #1 - Signal First | Ensures all data is real/fresh; prevents hallucination |
-| #2 - Research Before Email | Provides strategic context for personalization |
-| #3 - Send Not Draft | Ensures full automation; no manual intervention needed |
-| #4 - No Fabrication | Maintains credibility; every claim is verifiable |
-| #5 - Signal References | Forces specificity; avoids generic templates |
-| #6 - No Skipping | Guarantees complete pipeline execution |
 
 ---
 
