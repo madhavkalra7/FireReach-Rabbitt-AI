@@ -18,207 +18,63 @@ from config import OPENAI_API_KEY, SENDER_EMAIL, SENDER_EMAIL_APP_PASSWORD
 from schemas import SignalData
 
 
-# Initialize OpenAI client with timeout
-client = OpenAI(
-    api_key=OPENAI_API_KEY,
-    timeout=30.0,
-    max_retries=1
-)
-
-
-EMAIL_WRITER_SYSTEM_PROMPT = """You are an elite B2B sales development representative who writes highly personalized cold emails.
-
-CRITICAL RULE: You must ONLY use information explicitly provided in the signals. NEVER infer, assume, or add facts not present in the input. If something isn't in the signals, don't mention it. Accuracy is more important than impressiveness.
-
-Your emails:
-- Feel genuinely human and conversational
-- Lead with EXACT facts from the provided signals only
-- Never fabricate or assume information
-- Sound like a peer who did their research"""
+# Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 
 def _generate_email(signals: SignalData, account_brief: str, icp: str) -> dict:
     """
     Generate a personalized cold outreach email using OpenAI.
-    
-    Args:
-        signals: SignalData object with company signals
-        account_brief: The account brief from research analyst
-        icp: Ideal Customer Profile description
-    
-    Returns:
-        Dictionary with 'subject' and 'body' keys
     """
     print(f"📝 Generating email for {signals.company}...")
     
-    news_formatted = "\n".join([f"- {item}" for item in signals.news[:3]])
+    news_text = ", ".join(signals.news[:2]) if signals.news else "No recent news"
     
-    user_prompt = f"""Write a cold outreach email using ONLY the signals provided below.
+    messages = [
+        {
+            "role": "system",
+            "content": "You are an expert B2B sales copywriter. Write personalized cold emails. Use ONLY the provided facts. Return valid JSON with subject and body keys."
+        },
+        {
+            "role": "user", 
+            "content": f"""Write a cold email for {signals.company}.
 
-⚠️ STRICT ACCURACY RULE: You may ONLY reference facts explicitly stated in the signals below. Do NOT add, infer, or assume any information not present. If you're unsure about something, leave it out. Fabricating details will make the email worse, not better.
-
-**Our ICP (Ideal Customer Profile):**
-{icp}
-
-**Target Company:** {signals.company}
-
-**Account Research Brief:**
-{account_brief}
-
-**THESE ARE THE ONLY FACTS YOU CAN USE:**
+FACTS (use only these):
 - Funding: {signals.funding}
-- Hiring Activity: {signals.hiring}
-- Recent News:
-{news_formatted}
+- Hiring: {signals.hiring}
+- News: {news_text}
 
-**Email Structure:**
+ICP: {icp}
 
-1. **Opening Hook (1-2 sentences):** Reference ONE specific fact from signals above. Use exact numbers if present.
+Requirements:
+- 150-200 words
+- Reference specific facts above
+- Professional tone
+- Soft call-to-action
 
-2. **Context Bridge (2-3 sentences):** Connect their growth to potential challenges. ONLY reference things mentioned in signals.
-
-3. **Pain Point Connection (2-3 sentences):** Link their situation to our ICP's value prop.
-
-4. **Value Proposition (1-2 sentences):** What we offer and why it's relevant now.
-
-5. **Soft CTA (1 sentence):** Low-pressure ask.
-
-**Rules:**
-- ONLY use facts from the signals above - no external knowledge
-- If a signal says "No data" or "not found", don't reference that category
-- Peer-to-peer tone, not salesy
-- 200-300 words
-- No phrases like "I hope this finds you well"
-
-**Subject Line:** Must reference a specific signal fact.
-
-Return ONLY valid JSON:
-{{
-  "subject": "your subject line here",
-  "body": "your full email body here"
-}}"""
-
-    try:
-        print(f"🔄 Calling OpenAI API for email generation...")
-        response = client.chat.completions.create(
-            model="gpt-5-mini-2025-08-07",
-            messages=[
-                {"role": "system", "content": EMAIL_WRITER_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_completion_tokens=1000
-        )
-        
-        # Debug: Check finish reason
-        finish_reason = response.choices[0].finish_reason
-        print(f"📊 Finish reason: {finish_reason}")
-        
-        content = response.choices[0].message.content
-        print(f"📨 Raw LLM response length: {len(content) if content else 0}")
-        print(f"📨 Response preview: {content[:200] if content else 'EMPTY'}")
-        
-        # Handle empty or None response
-        if not content or len(content.strip()) < 50:
-            print(f"⚠️ Response too short or empty, generating structured fallback")
-            return _generate_structured_fallback(signals, icp)
-        
-        # Try to parse JSON from response
-        try:
-            # Clean the response - sometimes models add markdown code blocks
-            clean_content = content.strip()
-            if clean_content.startswith("```json"):
-                clean_content = clean_content[7:]
-            if clean_content.startswith("```"):
-                clean_content = clean_content[3:]
-            if clean_content.endswith("```"):
-                clean_content = clean_content[:-3]
-            clean_content = clean_content.strip()
-            
-            result = json.loads(clean_content)
-            
-            # Validate result has proper content
-            if not result.get("body") or len(result.get("body", "")) < 100:
-                print(f"⚠️ Parsed email too short, using fallback")
-                return _generate_structured_fallback(signals, icp)
-            
-            print(f"✅ Email generated successfully ({len(result.get('body', ''))} chars)")
-            return result
-        except json.JSONDecodeError as je:
-            print(f"⚠️ JSON parse failed: {je}")
-            # If content looks like an email, try to use it
-            if len(content) > 200 and ('Hi' in content or 'Hello' in content):
-                return {
-                    "subject": f"Re: {signals.company}'s recent growth",
-                    "body": content
-                }
-            return _generate_structured_fallback(signals, icp)
-        
-    except Exception as e:
-        print(f"❌ Error generating email: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        return _generate_structured_fallback(signals, icp)
-
-
-def _generate_structured_fallback(signals: SignalData, icp: str) -> dict:
-    """
-    Generate a structured fallback email when LLM fails.
-    Uses actual signal data to create a meaningful email.
-    """
-    company = signals.company
+Return JSON: {{"subject": "...", "body": "..."}}"""
+        }
+    ]
     
-    # Extract key facts from signals
-    funding_fact = signals.funding if signals.funding and "No " not in signals.funding else None
-    hiring_fact = signals.hiring if signals.hiring and "No " not in signals.hiring else None
-    news_fact = signals.news[0] if signals.news and "No " not in signals.news[0] else None
+    response = client.chat.completions.create(
+        model="gpt-5-mini-2025-08-07",
+        messages=messages,
+        max_completion_tokens=1500
+    )
     
-    # Build opening based on available data
-    if funding_fact and len(funding_fact) > 20:
-        # Truncate at sentence boundary if possible
-        fact_text = funding_fact[:200]
-        if '. ' in fact_text[50:]:
-            fact_text = fact_text[:fact_text.rfind('. ', 50) + 1]
-        opening = f"I noticed {company} has been active on the funding front - {fact_text}"
-        subject = f"{company}'s funding momentum"
-    elif hiring_fact and len(hiring_fact) > 20:
-        fact_text = hiring_fact[:200]
-        if '. ' in fact_text[50:]:
-            fact_text = fact_text[:fact_text.rfind('. ', 50) + 1]
-        opening = f"Saw that {company} is actively growing the team - {fact_text}"
-        subject = f"{company}'s team expansion"
-    elif news_fact and len(news_fact) > 20:
-        fact_text = news_fact[:200]
-        if '. ' in fact_text[50:]:
-            fact_text = fact_text[:fact_text.rfind('. ', 50) + 1]
-        opening = f"Came across some recent news about {company} - {fact_text}"
-        subject = f"Quick note about {company}"
-    else:
-        opening = f"I've been following {company}'s trajectory in the market and your growth caught my attention."
-        subject = f"Quick question for {company}"
+    content = response.choices[0].message.content.strip()
+    print(f"📨 Got response: {len(content)} chars")
     
-    # Extract what we sell from ICP
-    icp_lower = icp.lower()
+    # Clean markdown if present
+    if content.startswith("```"):
+        content = content.split("```")[1]
+        if content.startswith("json"):
+            content = content[4:]
+    content = content.strip()
     
-    body = f"""Hi there,
-
-{opening}
-
-That kind of momentum usually means the team is scaling fast - and with growth comes new challenges. Specifically around what we focus on: {icp}
-
-We've been working with companies at similar inflection points. Not assuming you need anything - but these conversations tend to be valuable when the timing is right.
-
-A few things we're seeing work well for teams in your position:
-- Building repeatable processes before complexity kicks in
-- Getting ahead of the gaps that rapid hiring creates
-- Aligning new team members quickly with what's already working
-
-Would a 15-minute call make sense? Happy to share specifics on what we're seeing with similar companies.
-
-Either way, congrats on the momentum.
-
-Best regards"""
-    
-    return {"subject": subject, "body": body}
+    result = json.loads(content)
+    print(f"✅ Email generated: {result.get('subject', 'No subject')}")
+    return result
 
 
 def _send_email_smtp(recipient_email: str, subject: str, body: str) -> bool:

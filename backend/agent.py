@@ -165,12 +165,6 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
     """
     FAST direct execution mode - bypasses agentic loop overhead.
     Runs all 3 tools sequentially without OpenAI decision-making.
-    
-    Args:
-        request: OutreachRequest with ICP, company, and recipient email
-    
-    Returns:
-        OutreachResponse with all results and steps
     """
     total_start = time.time()
     
@@ -182,88 +176,51 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
     
     steps = []
     
-    # Step 1: Harvest signals (parallel SerpAPI calls)
-    step1_start = time.time()
+    # Step 1: Harvest signals
     print("\n[1/3] Harvesting signals...")
     step1 = AgentStep(tool_name="tool_signal_harvester", status="running", result={})
-    try:
-        signals_data = harvest_signals(request.company)
-        step1.status = "completed"
-        step1.result = signals_data.model_dump()
-    except Exception as e:
-        print(f"❌ Signal harvesting failed: {e}")
-        step1.status = "failed"
-        step1.result = {"error": str(e)}
-        # Fallback with empty signals
-        signals_data = SignalData(
-            company=request.company,
-            funding="No funding data available",
-            hiring="No hiring data available", 
-            news=["No recent news found"],
-            tech_stack=[]
-        )
+    signals_data = harvest_signals(request.company)
+    step1.status = "completed"
+    step1.result = signals_data.model_dump()
     steps.append(step1)
-    print(f"   ⏱ Step 1 took {time.time() - step1_start:.1f}s")
+    print(f"   ✅ Signals harvested")
     
-    # Step 2: Analyze account (1 LLM call)
-    step2_start = time.time()
+    # Step 2: Analyze account
     print("\n[2/3] Analyzing account...")
     step2 = AgentStep(tool_name="tool_research_analyst", status="running", result={})
-    try:
-        account_brief = analyze_account(signals_data, request.icp)
-        step2.status = "completed"
-        step2.result = {"account_brief": account_brief}
-    except Exception as e:
-        print(f"❌ Account analysis failed: {e}")
-        step2.status = "failed"
-        # Fallback brief using available signals
-        account_brief = f"{request.company} shows activity in our target market. Based on available signals: {signals_data.funding}. {signals_data.hiring}. This aligns with our ICP focus on {request.icp[:100]}."
-        step2.result = {"account_brief": account_brief, "fallback": True}
+    account_brief = analyze_account(signals_data, request.icp)
+    step2.status = "completed"
+    step2.result = {"account_brief": account_brief}
     steps.append(step2)
-    print(f"   ⏱ Step 2 took {time.time() - step2_start:.1f}s")
+    print(f"   ✅ Account analyzed")
     
-    # Step 3: Write and send email (1 LLM call + SMTP)
-    step3_start = time.time()
+    # Step 3: Write and send email
     print("\n[3/3] Writing and sending email...")
     step3 = AgentStep(tool_name="tool_outreach_automated_sender", status="running", result={})
-    try:
-        email_result = write_and_send_email(
-            signals_data, 
-            account_brief, 
-            request.icp, 
-            request.recipient_email
-        )
-        step3.status = "completed"
-        step3.result = email_result
-        email_subject = email_result.get("subject", "")
-        email_body = email_result.get("body", "")
-        sent = email_result.get("sent", False)
-    except Exception as e:
-        print(f"❌ Email generation failed: {e}")
-        step3.status = "failed"
-        # Fallback email
-        email_subject = f"Quick question for {signals_data.company}"
-        email_body = f"Hi,\n\nI came across {signals_data.company} while researching companies in our target market.\n\n{signals_data.funding}\n\nGiven this, I thought there might be an opportunity to connect.\n\nWould you be open to a brief conversation?\n\nBest regards"
-        step3.result = {"subject": email_subject, "body": email_body, "sent": False, "fallback": True, "error": str(e)}
-        sent = False
+    email_result = write_and_send_email(
+        signals_data, 
+        account_brief, 
+        request.icp, 
+        request.recipient_email
+    )
+    step3.status = "completed"
+    step3.result = email_result
     steps.append(step3)
-    print(f"   ⏱ Step 3 took {time.time() - step3_start:.1f}s")
+    print(f"   ✅ Email generated")
     
     total_time = time.time() - total_start
     
     response = OutreachResponse(
         signals=signals_data,
         account_brief=account_brief,
-        email_subject=email_subject,
-        email_body=email_body,
-        sent=sent,
+        email_subject=email_result.get("subject", ""),
+        email_body=email_result.get("body", ""),
+        sent=email_result.get("sent", False),
         steps=steps
     )
     
     print(f"\n{'='*60}")
-    print(f"⚡ FireReach FAST Mode Complete")
-    print(f"   Email sent: {sent}")
-    print(f"   Total time: {total_time:.1f}s")
+    print(f"⚡ FireReach Complete in {total_time:.1f}s")
     print(f"{'='*60}\n")
     
     return response

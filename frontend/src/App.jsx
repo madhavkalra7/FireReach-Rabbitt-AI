@@ -1,17 +1,36 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import InputForm from './components/InputForm'
 import AgentTimeline from './components/AgentTimeline'
 import SignalCard from './components/SignalCard'
 import ResearchBrief from './components/ResearchBrief'
 import EmailPreview from './components/EmailPreview'
+import { ShaderAnimation } from './components/ui/shader-animation'
 
 export default function App() {
+  const [showIntro, setShowIntro] = useState(true)
+  const [introFading, setIntroFading] = useState(false)
   const [state, setState] = useState({
     step: 'idle',
     steps: [],
     result: null,
     error: null
   })
+
+  useEffect(() => {
+    if (showIntro) {
+      const timer = setTimeout(() => {
+        handleSkipIntro()
+      }, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [showIntro])
+
+  const handleSkipIntro = () => {
+    setIntroFading(true)
+    setTimeout(() => {
+      setShowIntro(false)
+    }, 500)
+  }
 
   const handleSubmit = async (formData) => {
     setState({
@@ -56,6 +75,21 @@ export default function App() {
 
   const handleReset = () => {
     setState({ step: 'idle', steps: [], result: null, error: null })
+  }
+
+  // Fullscreen Intro Splash Screen
+  if (showIntro) {
+    return (
+      <div className={`intro-splash ${introFading ? 'fading' : ''}`}>
+        <ShaderAnimation />
+        <div className="intro-content">
+          <h1 className="intro-title">FireReach</h1>
+          <button className="skip-intro-btn" onClick={handleSkipIntro}>
+            Skip Intro
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (

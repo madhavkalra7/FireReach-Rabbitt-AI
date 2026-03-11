@@ -73,6 +73,92 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
 
+/* Intro Splash Screen */
+.intro-splash {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: #000;
+  transition: opacity 0.5s ease-out;
+}
+
+.intro-splash.fading {
+  opacity: 0;
+}
+
+.intro-splash > div:first-child {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.intro-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.intro-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 0 60px rgba(129, 140, 248, 0.6);
+  margin-bottom: 2rem;
+  animation: intro-title-pulse 2s ease-in-out infinite;
+}
+
+@keyframes intro-title-pulse {
+  0%, 100% { text-shadow: 0 0 60px rgba(129, 140, 248, 0.6); }
+  50% { text-shadow: 0 0 80px rgba(129, 140, 248, 0.9), 0 0 120px rgba(129, 140, 248, 0.4); }
+}
+
+.skip-intro-btn {
+  position: absolute;
+  bottom: 3rem;
+  padding: 0.75rem 2rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  backdrop-filter: blur(10px);
+}
+
+.skip-intro-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+@media (max-width: 768px) {
+  .intro-title {
+    font-size: 3.5rem;
+  }
+  
+  .skip-intro-btn {
+    bottom: 2rem;
+  }
+}
+
 /* App Layout */
 .app {
   min-height: 100vh;
@@ -772,6 +858,46 @@ body {
 @keyframes glow-pulse-active {
   0%, 100% { opacity: 0.8; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* Shader Hero Section */
+.shader-hero {
+  padding: 0;
+}
+
+.shader-container {
+  position: relative;
+  width: 100%;
+  height: 400px;
+  margin-bottom: 2rem;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shader-title {
+  position: absolute;
+  z-index: 10;
+  text-align: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+  pointer-events: none;
+  text-shadow: 0 0 40px rgba(129, 140, 248, 0.5);
+}
+
+@media (max-width: 768px) {
+  .shader-container {
+    height: 300px;
+  }
+  
+  .shader-title {
+    font-size: 3rem;
+  }
 }
 
 .empty-icon {
