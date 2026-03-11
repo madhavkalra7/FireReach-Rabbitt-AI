@@ -32,25 +32,17 @@ def _generate_email(signals: SignalData, account_brief: str, icp: str) -> dict:
     
     messages = [
         {
-            "role": "system",
-            "content": "You are an expert B2B sales copywriter. Write personalized cold emails. Use ONLY the provided facts. Return valid JSON with subject and body keys."
-        },
-        {
             "role": "user", 
-            "content": f"""Write a cold email for {signals.company}.
+            "content": f"""Write a personalized cold email for {signals.company}.
 
-FACTS (use only these):
+Facts:
 - Funding: {signals.funding}
 - Hiring: {signals.hiring}
 - News: {news_text}
 
 ICP: {icp}
 
-Requirements:
-- 150-200 words
-- Reference specific facts above
-- Professional tone
-- Soft call-to-action
+Write 150-200 words, professional tone, soft CTA.
 
 Return JSON: {{"subject": "...", "body": "..."}}"""
         }
@@ -59,7 +51,7 @@ Return JSON: {{"subject": "...", "body": "..."}}"""
     response = client.chat.completions.create(
         model="gpt-5-mini-2025-08-07",
         messages=messages,
-        max_completion_tokens=1500
+        max_completion_tokens=5000
     )
     
     content = response.choices[0].message.content.strip()

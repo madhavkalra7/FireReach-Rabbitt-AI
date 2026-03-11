@@ -27,12 +27,8 @@ def analyze_account(signals: SignalData, icp: str) -> str:
     
     messages = [
         {
-            "role": "system",
-            "content": "You are a B2B account research analyst. Write concise account briefs using only the provided facts."
-        },
-        {
             "role": "user",
-            "content": f"""Write a 2-paragraph brief for {signals.company}:
+            "content": f"""Write a 2-paragraph account brief for {signals.company}.
 
 Facts:
 - Funding: {signals.funding}
@@ -49,7 +45,7 @@ Para 2: Why they need our help"""
     response = client.chat.completions.create(
         model="gpt-5-mini-2025-08-07",
         messages=messages,
-        max_completion_tokens=500
+        max_completion_tokens=5000
     )
     
     content = response.choices[0].message.content.strip()
