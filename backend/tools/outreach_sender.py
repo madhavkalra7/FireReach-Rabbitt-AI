@@ -44,6 +44,8 @@ ICP: {icp}
 
 Write 150-200 words, professional tone, soft CTA.
 
+IMPORTANT: Do NOT use any placeholders like [Name], [Your name], [Company], etc. Start with "Hi," or "Hi there," and end with just "Best regards" - no signature needed.
+
 Return JSON: {{"subject": "...", "body": "..."}}"""
         }
     ]
