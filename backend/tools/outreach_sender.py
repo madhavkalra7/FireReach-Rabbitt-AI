@@ -166,32 +166,49 @@ def _generate_structured_fallback(signals: SignalData, icp: str) -> dict:
     
     # Build opening based on available data
     if funding_fact and len(funding_fact) > 20:
-        opening = f"I noticed {company} has been making moves - {funding_fact[:150]}."
+        # Truncate at sentence boundary if possible
+        fact_text = funding_fact[:200]
+        if '. ' in fact_text[50:]:
+            fact_text = fact_text[:fact_text.rfind('. ', 50) + 1]
+        opening = f"I noticed {company} has been active on the funding front - {fact_text}"
         subject = f"{company}'s funding momentum"
     elif hiring_fact and len(hiring_fact) > 20:
-        opening = f"Saw that {company} is actively growing the team - {hiring_fact[:150]}."
+        fact_text = hiring_fact[:200]
+        if '. ' in fact_text[50:]:
+            fact_text = fact_text[:fact_text.rfind('. ', 50) + 1]
+        opening = f"Saw that {company} is actively growing the team - {fact_text}"
         subject = f"{company}'s team expansion"
     elif news_fact and len(news_fact) > 20:
-        opening = f"Came across some recent news about {company} - {news_fact[:150]}."
+        fact_text = news_fact[:200]
+        if '. ' in fact_text[50:]:
+            fact_text = fact_text[:fact_text.rfind('. ', 50) + 1]
+        opening = f"Came across some recent news about {company} - {fact_text}"
         subject = f"Quick note about {company}"
     else:
-        opening = f"I've been following {company}'s trajectory in the market."
+        opening = f"I've been following {company}'s trajectory in the market and your growth caught my attention."
         subject = f"Quick question for {company}"
     
-    # Extract ICP value prop
-    icp_short = icp[:100] if len(icp) > 100 else icp
+    # Extract what we sell from ICP
+    icp_lower = icp.lower()
     
-    body = f"""Hi,
+    body = f"""Hi there,
 
 {opening}
 
-That kind of growth typically brings interesting challenges - especially around {icp_short.lower() if icp_short else 'scaling operations'}.
+That kind of momentum usually means the team is scaling fast - and with growth comes new challenges. Specifically around what we focus on: {icp}
 
-We work with companies at similar inflection points, helping them navigate the complexity that comes with rapid expansion. Not saying you need help - just that the timing often makes these conversations useful.
+We've been working with companies at similar inflection points. Not assuming you need anything - but these conversations tend to be valuable when the timing is right.
 
-Would it make sense to connect for 15 minutes? Happy to share what we're seeing work for similar companies.
+A few things we're seeing work well for teams in your position:
+- Building repeatable processes before complexity kicks in
+- Getting ahead of the gaps that rapid hiring creates
+- Aligning new team members quickly with what's already working
 
-Best,"""
+Would a 15-minute call make sense? Happy to share specifics on what we're seeing with similar companies.
+
+Either way, congrats on the momentum.
+
+Best regards"""
     
     return {"subject": subject, "body": body}
 
