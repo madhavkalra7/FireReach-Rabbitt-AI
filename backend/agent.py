@@ -3,6 +3,7 @@ FireReach Agent
 Agentic loop using OpenAI function calling for autonomous outreach.
 """
 import json
+import time
 from openai import OpenAI
 
 from config import OPENAI_API_KEY
@@ -12,8 +13,12 @@ from tools.research_analyst import analyze_account
 from tools.outreach_sender import write_and_send_email
 
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Initialize OpenAI client with timeout
+client = OpenAI(
+    api_key=OPENAI_API_KEY,
+    timeout=30.0,  # 30 second timeout for API calls
+    max_retries=1  # Only 1 retry to avoid long waits
+)
 
 
 # Agent system prompt
@@ -167,6 +172,8 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
     Returns:
         OutreachResponse with all results and steps
     """
+    total_start = time.time()
+    
     print(f"\n{'='*60}")
     print(f"⚡ FireReach FAST Mode")
     print(f"   Company: {request.company}")
@@ -176,6 +183,7 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
     steps = []
     
     # Step 1: Harvest signals (parallel SerpAPI calls)
+    step1_start = time.time()
     print("\n[1/3] Harvesting signals...")
     step1 = AgentStep(tool_name="tool_signal_harvester", status="running", result={})
     try:
@@ -195,8 +203,10 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
             tech_stack=[]
         )
     steps.append(step1)
+    print(f"   ⏱ Step 1 took {time.time() - step1_start:.1f}s")
     
     # Step 2: Analyze account (1 LLM call)
+    step2_start = time.time()
     print("\n[2/3] Analyzing account...")
     step2 = AgentStep(tool_name="tool_research_analyst", status="running", result={})
     try:
@@ -210,8 +220,10 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
         account_brief = f"{request.company} shows activity in our target market. Based on available signals: {signals_data.funding}. {signals_data.hiring}. This aligns with our ICP focus on {request.icp[:100]}."
         step2.result = {"account_brief": account_brief, "fallback": True}
     steps.append(step2)
+    print(f"   ⏱ Step 2 took {time.time() - step2_start:.1f}s")
     
     # Step 3: Write and send email (1 LLM call + SMTP)
+    step3_start = time.time()
     print("\n[3/3] Writing and sending email...")
     step3 = AgentStep(tool_name="tool_outreach_automated_sender", status="running", result={})
     try:
@@ -235,6 +247,9 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
         step3.result = {"subject": email_subject, "body": email_body, "sent": False, "fallback": True, "error": str(e)}
         sent = False
     steps.append(step3)
+    print(f"   ⏱ Step 3 took {time.time() - step3_start:.1f}s")
+    
+    total_time = time.time() - total_start
     
     response = OutreachResponse(
         signals=signals_data,
@@ -248,6 +263,7 @@ def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
     print(f"\n{'='*60}")
     print(f"⚡ FireReach FAST Mode Complete")
     print(f"   Email sent: {sent}")
+    print(f"   Total time: {total_time:.1f}s")
     print(f"{'='*60}\n")
     
     return response

@@ -18,8 +18,12 @@ from config import OPENAI_API_KEY, SENDER_EMAIL, SENDER_EMAIL_APP_PASSWORD
 from schemas import SignalData
 
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Initialize OpenAI client with timeout
+client = OpenAI(
+    api_key=OPENAI_API_KEY,
+    timeout=30.0,
+    max_retries=1
+)
 
 
 EMAIL_WRITER_SYSTEM_PROMPT = """You are an elite B2B sales development representative who writes highly personalized cold emails.
@@ -105,14 +109,12 @@ Return ONLY valid JSON:
         )
         
         content = response.choices[0].message.content
+        print(f"📨 Raw LLM response length: {len(content) if content else 0}")
         
         # Handle empty or None response
-        if not content:
-            print(f"⚠️ Empty response from OpenAI, using fallback")
-            return {
-                "subject": f"Quick question about {signals.company}'s growth",
-                "body": f"Hi,\n\nI noticed {signals.company} recently {signals.funding[:100] if signals.funding else 'made some exciting moves'}. Given your growth trajectory, I'd love to explore how we might help.\n\nWould you be open to a brief conversation?\n\nBest regards"
-            }
+        if not content or len(content.strip()) < 50:
+            print(f"⚠️ Response too short or empty, generating structured fallback")
+            return _generate_structured_fallback(signals, icp)
         
         # Try to parse JSON from response
         try:
@@ -127,25 +129,71 @@ Return ONLY valid JSON:
             clean_content = clean_content.strip()
             
             result = json.loads(clean_content)
-            print(f"✅ Email generated successfully")
+            
+            # Validate result has proper content
+            if not result.get("body") or len(result.get("body", "")) < 100:
+                print(f"⚠️ Parsed email too short, using fallback")
+                return _generate_structured_fallback(signals, icp)
+            
+            print(f"✅ Email generated successfully ({len(result.get('body', ''))} chars)")
             return result
         except json.JSONDecodeError as je:
-            print(f"⚠️ JSON parse failed, extracting from text")
-            # Try to extract subject and body from plain text
-            lines = content.split('\n')
-            subject = f"Quick question about {signals.company}"
-            body = content
-            
-            for line in lines:
-                if 'subject' in line.lower() and ':' in line:
-                    subject = line.split(':', 1)[1].strip().strip('"').strip("'")
-                    break
-            
-            return {"subject": subject, "body": body}
+            print(f"⚠️ JSON parse failed: {je}")
+            # If content looks like an email, try to use it
+            if len(content) > 200 and ('Hi' in content or 'Hello' in content):
+                return {
+                    "subject": f"Re: {signals.company}'s recent growth",
+                    "body": content
+                }
+            return _generate_structured_fallback(signals, icp)
         
     except Exception as e:
         print(f"❌ Error generating email: {e}")
-        raise
+        return _generate_structured_fallback(signals, icp)
+
+
+def _generate_structured_fallback(signals: SignalData, icp: str) -> dict:
+    """
+    Generate a structured fallback email when LLM fails.
+    Uses actual signal data to create a meaningful email.
+    """
+    company = signals.company
+    
+    # Extract key facts from signals
+    funding_fact = signals.funding if signals.funding and "No " not in signals.funding else None
+    hiring_fact = signals.hiring if signals.hiring and "No " not in signals.hiring else None
+    news_fact = signals.news[0] if signals.news and "No " not in signals.news[0] else None
+    
+    # Build opening based on available data
+    if funding_fact and len(funding_fact) > 20:
+        opening = f"I noticed {company} has been making moves - {funding_fact[:150]}."
+        subject = f"{company}'s funding momentum"
+    elif hiring_fact and len(hiring_fact) > 20:
+        opening = f"Saw that {company} is actively growing the team - {hiring_fact[:150]}."
+        subject = f"{company}'s team expansion"
+    elif news_fact and len(news_fact) > 20:
+        opening = f"Came across some recent news about {company} - {news_fact[:150]}."
+        subject = f"Quick note about {company}"
+    else:
+        opening = f"I've been following {company}'s trajectory in the market."
+        subject = f"Quick question for {company}"
+    
+    # Extract ICP value prop
+    icp_short = icp[:100] if len(icp) > 100 else icp
+    
+    body = f"""Hi,
+
+{opening}
+
+That kind of growth typically brings interesting challenges - especially around {icp_short.lower() if icp_short else 'scaling operations'}.
+
+We work with companies at similar inflection points, helping them navigate the complexity that comes with rapid expansion. Not saying you need help - just that the timing often makes these conversations useful.
+
+Would it make sense to connect for 15 minutes? Happy to share what we're seeing work for similar companies.
+
+Best,"""
+    
+    return {"subject": subject, "body": body}
 
 
 def _send_email_smtp(recipient_email: str, subject: str, body: str) -> bool:

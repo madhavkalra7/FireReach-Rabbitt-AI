@@ -13,8 +13,12 @@ from config import OPENAI_API_KEY
 from schemas import SignalData
 
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Initialize OpenAI client with timeout
+client = OpenAI(
+    api_key=OPENAI_API_KEY,
+    timeout=30.0,
+    max_retries=1
+)
 
 
 SYSTEM_PROMPT = """You are an elite B2B account research analyst. You write sharp, insight-driven account briefs for sales teams.
