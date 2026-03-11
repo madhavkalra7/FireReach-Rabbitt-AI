@@ -201,7 +201,7 @@ Begin now."""
     sent = False
     
     # Agentic loop
-    max_iterations = 10  # Safety limit
+    max_iterations = 5  # Safety limit - 3 tools + 2 buffer
     iteration = 0
     
     while iteration < max_iterations:

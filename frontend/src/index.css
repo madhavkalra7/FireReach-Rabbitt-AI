@@ -731,6 +731,62 @@ body {
   text-align: center;
 }
 
+/* Diamond Video */
+.diamond-container {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.diamond-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 0 30px rgba(129, 140, 248, 0.4));
+  animation: diamond-float 4s ease-in-out infinite;
+}
+
+.diamond-glow {
+  position: absolute;
+  inset: -20%;
+  background: radial-gradient(circle, rgba(129, 140, 248, 0.15) 0%, transparent 70%);
+  pointer-events: none;
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+.diamond-glow.active {
+  animation: glow-pulse-active 1.5s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(129, 140, 248, 0.25) 0%, rgba(192, 132, 252, 0.1) 50%, transparent 70%);
+}
+
+.diamond-spinning .diamond-video {
+  animation: diamond-spin 8s linear infinite, diamond-float 4s ease-in-out infinite;
+}
+
+@keyframes diamond-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-12px) scale(1.02); }
+}
+
+@keyframes diamond-spin {
+  0% { filter: drop-shadow(0 0 30px rgba(129, 140, 248, 0.4)) hue-rotate(0deg); }
+  100% { filter: drop-shadow(0 0 30px rgba(129, 140, 248, 0.4)) hue-rotate(360deg); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes glow-pulse-active {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
 .empty-icon {
   width: 80px;
   height: 80px;

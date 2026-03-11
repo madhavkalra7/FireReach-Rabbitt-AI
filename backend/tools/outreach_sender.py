@@ -68,13 +68,47 @@ Return JSON only:
                 {"role": "system", "content": EMAIL_WRITER_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            response_format={"type": "json_object"},
             max_completion_tokens=600
         )
         
-        result = json.loads(response.choices[0].message.content)
-        print(f"✅ Email generated successfully")
-        return result
+        content = response.choices[0].message.content
+        
+        # Handle empty or None response
+        if not content:
+            print(f"⚠️ Empty response from OpenAI, using fallback")
+            return {
+                "subject": f"Quick question about {signals.company}'s growth",
+                "body": f"Hi,\n\nI noticed {signals.company} recently {signals.funding[:100] if signals.funding else 'made some exciting moves'}. Given your growth trajectory, I'd love to explore how we might help.\n\nWould you be open to a brief conversation?\n\nBest regards"
+            }
+        
+        # Try to parse JSON from response
+        try:
+            # Clean the response - sometimes models add markdown code blocks
+            clean_content = content.strip()
+            if clean_content.startswith("```json"):
+                clean_content = clean_content[7:]
+            if clean_content.startswith("```"):
+                clean_content = clean_content[3:]
+            if clean_content.endswith("```"):
+                clean_content = clean_content[:-3]
+            clean_content = clean_content.strip()
+            
+            result = json.loads(clean_content)
+            print(f"✅ Email generated successfully")
+            return result
+        except json.JSONDecodeError as je:
+            print(f"⚠️ JSON parse failed, extracting from text")
+            # Try to extract subject and body from plain text
+            lines = content.split('\n')
+            subject = f"Quick question about {signals.company}"
+            body = content
+            
+            for line in lines:
+                if 'subject' in line.lower() and ':' in line:
+                    subject = line.split(':', 1)[1].strip().strip('"').strip("'")
+                    break
+            
+            return {"subject": subject, "body": body}
         
     except Exception as e:
         print(f"❌ Error generating email: {e}")

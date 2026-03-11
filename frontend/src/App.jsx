@@ -93,17 +93,37 @@ export default function App() {
         <section className="content">
           {state.step === 'idle' && !state.error && (
             <div className="empty-state">
-              <div className="empty-icon">🎯</div>
+              <div className="diamond-container">
+                <video
+                  className="diamond-video"
+                  src="/diamond.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                />
+                <div className="diamond-glow" />
+              </div>
               <h2 className="empty-title">Ready to Launch</h2>
               <p className="empty-text">
-                Enter your ICP and target company to start the autonomous outreach agent
+                Enter your ICP and target company to start the autonomous outreach engine
               </p>
             </div>
           )}
 
           {state.step === 'running' && (
             <div className="loading-state">
-              <div className="loading-orb" />
+              <div className="diamond-container diamond-spinning">
+                <video
+                  className="diamond-video"
+                  src="/diamond.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                />
+                <div className="diamond-glow active" />
+              </div>
               <h2 className="loading-title">Agent Working</h2>
               <p className="loading-text">Harvesting signals and crafting your email...</p>
             </div>
