@@ -99,6 +99,7 @@ Return ONLY valid JSON:
 }}"""
 
     try:
+        print(f"🔄 Calling OpenAI API for email generation...")
         response = client.chat.completions.create(
             model="gpt-5-mini-2025-08-07",
             messages=[
@@ -108,8 +109,13 @@ Return ONLY valid JSON:
             max_completion_tokens=1000
         )
         
+        # Debug: Check finish reason
+        finish_reason = response.choices[0].finish_reason
+        print(f"📊 Finish reason: {finish_reason}")
+        
         content = response.choices[0].message.content
         print(f"📨 Raw LLM response length: {len(content) if content else 0}")
+        print(f"📨 Response preview: {content[:200] if content else 'EMPTY'}")
         
         # Handle empty or None response
         if not content or len(content.strip()) < 50:
@@ -148,7 +154,9 @@ Return ONLY valid JSON:
             return _generate_structured_fallback(signals, icp)
         
     except Exception as e:
-        print(f"❌ Error generating email: {e}")
+        print(f"❌ Error generating email: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return _generate_structured_fallback(signals, icp)
 
 
