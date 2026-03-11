@@ -22,7 +22,14 @@ from schemas import SignalData
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 
-EMAIL_WRITER_SYSTEM_PROMPT = """You are a world-class B2B sales copywriter. Write emails that feel human, warm, and ultra-specific. Never use templates. Every sentence must earn its place."""
+EMAIL_WRITER_SYSTEM_PROMPT = """You are an elite B2B sales development representative who writes highly personalized, insight-driven cold emails. Your emails:
+- Feel genuinely human and conversational
+- Lead with specific, researched observations (exact numbers, product names, recent announcements)
+- Connect the dots between their current situation and potential pain points
+- Never feel templated or salesy
+- Sound like a peer who genuinely understands their business
+
+You write emails that recipients actually want to respond to because they feel personally crafted."""
 
 
 def _generate_email(signals: SignalData, account_brief: str, icp: str) -> dict:
@@ -39,26 +46,52 @@ def _generate_email(signals: SignalData, account_brief: str, icp: str) -> dict:
     """
     print(f"📝 Generating email for {signals.company}...")
     
-    news_formatted = ", ".join(signals.news[:2])  # Use top 2 news items
+    news_formatted = "\n".join([f"- {item}" for item in signals.news[:3]])
+    tech_formatted = ", ".join(signals.tech_stack[:5]) if signals.tech_stack else "Not specified"
     
-    user_prompt = f"""Write a cold outreach email based on:
-ICP: {icp}
-Account Brief: {account_brief}
-Signals: funding={signals.funding}, hiring={signals.hiring}, news={news_formatted}
+    user_prompt = f"""Write a compelling cold outreach email for:
 
-Rules:
-- Subject line: clever, specific, references one signal
-- Opening: reference ONE specific signal immediately (hiring numbers, funding amount, etc.)
-- Middle: connect their growth moment to the pain point our ICP solves
-- CTA: one simple ask, no pressure
-- Tone: peer-to-peer, not salesy
-- Length: 150-200 words max
-- NO generic phrases like 'I hope this finds you well'
+**Our ICP (Ideal Customer Profile):**
+{icp}
 
-Return JSON only:
+**Target Company:** {signals.company}
+
+**Account Research Brief:**
+{account_brief}
+
+**Live Signals:**
+- Funding: {signals.funding}
+- Hiring Activity: {signals.hiring}
+- Recent News:
+{news_formatted}
+- Tech Stack: {tech_formatted}
+
+**Email Structure Requirements:**
+
+1. **Opening Hook (1-2 sentences):** Start with a SPECIFIC observation from the signals. Use exact numbers ("228 open roles", "$750M IPO", etc.). Make it clear you've done your homework.
+
+2. **Context Bridge (2-3 sentences):** Connect their current growth/changes to potential challenges. Reference specific product launches, team expansions, or market moves. Show you understand what's happening at their company RIGHT NOW.
+
+3. **Pain Point Connection (2-3 sentences):** Explain why their current situation creates a specific need that aligns with our ICP. Don't be preachy - acknowledge they're probably doing things right, but growth creates gaps.
+
+4. **Value Proposition (1-2 sentences):** Briefly explain what we do and why it's relevant to their specific moment. Reference similar companies or situations.
+
+5. **Soft CTA (1 sentence):** Low-pressure ask. Something like "Would it be unreasonable to..." or "Worth a quick conversation?"
+
+**Tone:**
+- Peer-to-peer, not vendor-to-prospect
+- Confident but not arrogant
+- Genuinely curious about their challenges
+- NEVER use phrases like "I hope this finds you well", "reaching out", "touching base", "synergy"
+
+**Length:** 200-300 words (substantial but scannable)
+
+**Subject Line:** Clever, specific, references one concrete signal. Not clickbait.
+
+Return ONLY valid JSON:
 {{
-  "subject": "...",
-  "body": "..."
+  "subject": "your subject line here",
+  "body": "your full email body here"
 }}"""
 
     try:
@@ -68,7 +101,7 @@ Return JSON only:
                 {"role": "system", "content": EMAIL_WRITER_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            max_completion_tokens=600
+            max_completion_tokens=1000
         )
         
         content = response.choices[0].message.content
