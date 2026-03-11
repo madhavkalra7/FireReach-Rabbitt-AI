@@ -22,14 +22,15 @@ from schemas import SignalData
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 
-EMAIL_WRITER_SYSTEM_PROMPT = """You are an elite B2B sales development representative who writes highly personalized, insight-driven cold emails. Your emails:
-- Feel genuinely human and conversational
-- Lead with specific, researched observations (exact numbers, product names, recent announcements)
-- Connect the dots between their current situation and potential pain points
-- Never feel templated or salesy
-- Sound like a peer who genuinely understands their business
+EMAIL_WRITER_SYSTEM_PROMPT = """You are an elite B2B sales development representative who writes highly personalized cold emails.
 
-You write emails that recipients actually want to respond to because they feel personally crafted."""
+CRITICAL RULE: You must ONLY use information explicitly provided in the signals. NEVER infer, assume, or add facts not present in the input. If something isn't in the signals, don't mention it. Accuracy is more important than impressiveness.
+
+Your emails:
+- Feel genuinely human and conversational
+- Lead with EXACT facts from the provided signals only
+- Never fabricate or assume information
+- Sound like a peer who did their research"""
 
 
 def _generate_email(signals: SignalData, account_brief: str, icp: str) -> dict:
@@ -47,9 +48,10 @@ def _generate_email(signals: SignalData, account_brief: str, icp: str) -> dict:
     print(f"📝 Generating email for {signals.company}...")
     
     news_formatted = "\n".join([f"- {item}" for item in signals.news[:3]])
-    tech_formatted = ", ".join(signals.tech_stack[:5]) if signals.tech_stack else "Not specified"
     
-    user_prompt = f"""Write a compelling cold outreach email for:
+    user_prompt = f"""Write a cold outreach email using ONLY the signals provided below.
+
+⚠️ STRICT ACCURACY RULE: You may ONLY reference facts explicitly stated in the signals below. Do NOT add, infer, or assume any information not present. If you're unsure about something, leave it out. Fabricating details will make the email worse, not better.
 
 **Our ICP (Ideal Customer Profile):**
 {icp}
@@ -59,34 +61,32 @@ def _generate_email(signals: SignalData, account_brief: str, icp: str) -> dict:
 **Account Research Brief:**
 {account_brief}
 
-**Live Signals:**
+**THESE ARE THE ONLY FACTS YOU CAN USE:**
 - Funding: {signals.funding}
 - Hiring Activity: {signals.hiring}
 - Recent News:
 {news_formatted}
-- Tech Stack: {tech_formatted}
 
-**Email Structure Requirements:**
+**Email Structure:**
 
-1. **Opening Hook (1-2 sentences):** Start with a SPECIFIC observation from the signals. Use exact numbers ("228 open roles", "$750M IPO", etc.). Make it clear you've done your homework.
+1. **Opening Hook (1-2 sentences):** Reference ONE specific fact from signals above. Use exact numbers if present.
 
-2. **Context Bridge (2-3 sentences):** Connect their current growth/changes to potential challenges. Reference specific product launches, team expansions, or market moves. Show you understand what's happening at their company RIGHT NOW.
+2. **Context Bridge (2-3 sentences):** Connect their growth to potential challenges. ONLY reference things mentioned in signals.
 
-3. **Pain Point Connection (2-3 sentences):** Explain why their current situation creates a specific need that aligns with our ICP. Don't be preachy - acknowledge they're probably doing things right, but growth creates gaps.
+3. **Pain Point Connection (2-3 sentences):** Link their situation to our ICP's value prop.
 
-4. **Value Proposition (1-2 sentences):** Briefly explain what we do and why it's relevant to their specific moment. Reference similar companies or situations.
+4. **Value Proposition (1-2 sentences):** What we offer and why it's relevant now.
 
-5. **Soft CTA (1 sentence):** Low-pressure ask. Something like "Would it be unreasonable to..." or "Worth a quick conversation?"
+5. **Soft CTA (1 sentence):** Low-pressure ask.
 
-**Tone:**
-- Peer-to-peer, not vendor-to-prospect
-- Confident but not arrogant
-- Genuinely curious about their challenges
-- NEVER use phrases like "I hope this finds you well", "reaching out", "touching base", "synergy"
+**Rules:**
+- ONLY use facts from the signals above - no external knowledge
+- If a signal says "No data" or "not found", don't reference that category
+- Peer-to-peer tone, not salesy
+- 200-300 words
+- No phrases like "I hope this finds you well"
 
-**Length:** 200-300 words (substantial but scannable)
-
-**Subject Line:** Clever, specific, references one concrete signal. Not clickbait.
+**Subject Line:** Must reference a specific signal fact.
 
 Return ONLY valid JSON:
 {{

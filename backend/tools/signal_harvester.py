@@ -6,6 +6,7 @@ import requests
 from typing import Optional
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +18,7 @@ from schemas import SignalData
 SERP_API_BASE_URL = "https://serpapi.com/search"
 
 
-def _search_google(query: str, num_results: int = 5) -> list[dict]:
+def _search_google(query: str, num_results: int = 3) -> list[dict]:
     """
     Execute a Google search using SerpAPI.
     
@@ -36,7 +37,7 @@ def _search_google(query: str, num_results: int = 5) -> list[dict]:
     }
     
     try:
-        response = requests.get(SERP_API_BASE_URL, params=params, timeout=30)
+        response = requests.get(SERP_API_BASE_URL, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()
         return data.get("organic_results", [])
@@ -126,6 +127,7 @@ def _extract_tech_stack(results: list[dict]) -> list[str]:
 def harvest_signals(company: str) -> SignalData:
     """
     Harvest live signals about a target company using real SerpAPI searches.
+    Runs searches in PARALLEL for speed.
     
     Args:
         company: Name of the target company
@@ -135,31 +137,39 @@ def harvest_signals(company: str) -> SignalData:
     """
     print(f"🔍 Harvesting signals for: {company}")
     
-    # Execute real SerpAPI searches
-    funding_query = f"{company} funding 2024 2025"
-    hiring_query = f"{company} hiring jobs site:linkedin.com OR site:greenhouse.io"
-    news_query = f"{company} news announcement 2025"
-    tech_query = f"{company} tech stack"
+    # Define search queries
+    queries = {
+        "funding": f"{company} funding raised investment 2024 2025",
+        "hiring": f"{company} hiring jobs careers",
+        "news": f"{company} news announcement 2025"
+    }
     
-    print(f"  → Searching: {funding_query}")
-    funding_results = _search_google(funding_query)
+    results = {}
     
-    print(f"  → Searching: {hiring_query}")
-    hiring_results = _search_google(hiring_query)
-    
-    print(f"  → Searching: {news_query}")
-    news_results = _search_google(news_query)
-    
-    print(f"  → Searching: {tech_query}")
-    tech_results = _search_google(tech_query)
+    # Execute searches in PARALLEL for speed
+    print(f"  → Running 3 parallel searches...")
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_key = {
+            executor.submit(_search_google, query): key 
+            for key, query in queries.items()
+        }
+        
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                results[key] = future.result()
+                print(f"  ✓ {key} search complete")
+            except Exception as e:
+                print(f"  ✗ {key} search failed: {e}")
+                results[key] = []
     
     # Parse and structure the results
     signals = SignalData(
         company=company,
-        funding=_extract_funding_info(funding_results),
-        hiring=_extract_hiring_info(hiring_results),
-        news=_extract_news(news_results),
-        tech_stack=_extract_tech_stack(tech_results)
+        funding=_extract_funding_info(results.get("funding", [])),
+        hiring=_extract_hiring_info(results.get("hiring", [])),
+        news=_extract_news(results.get("news", [])),
+        tech_stack=[]
     )
     
     print(f"✅ Signal harvesting complete for {company}")

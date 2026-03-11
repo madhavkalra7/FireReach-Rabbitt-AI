@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from schemas import OutreachRequest, OutreachResponse
-from agent import run_agent
+from agent import run_agent_fast  # Use fast mode
 from config import validate_config
 
 
@@ -53,8 +53,8 @@ async def run_outreach(request: OutreachRequest):
         # Validate configuration before running
         validate_config()
         
-        # Run the agent
-        result = run_agent(request)
+        # Run the agent in FAST mode (bypasses agentic loop overhead)
+        result = run_agent_fast(request)
         return result
         
     except ValueError as e:

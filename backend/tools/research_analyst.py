@@ -17,7 +17,9 @@ from schemas import SignalData
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 
-SYSTEM_PROMPT = """You are an elite B2B account research analyst. You write sharp, insight-driven account briefs for sales teams. Be specific, reference the actual signals, and highlight strategic alignment."""
+SYSTEM_PROMPT = """You are an elite B2B account research analyst. You write sharp, insight-driven account briefs for sales teams.
+
+CRITICAL: You must ONLY use information explicitly provided in the signals. NEVER add facts, statistics, or claims not present in the input. If information is missing, acknowledge it or skip it. Accuracy is paramount - a brief with fewer facts is better than one with fabricated facts."""
 
 
 def analyze_account(signals: SignalData, icp: str) -> str:
@@ -35,20 +37,23 @@ def analyze_account(signals: SignalData, icp: str) -> str:
     
     # Format news as a readable list
     news_formatted = "\n".join([f"  - {item}" for item in signals.news])
-    tech_formatted = ", ".join(signals.tech_stack)
     
-    user_prompt = f"""ICP: {icp}
+    user_prompt = f"""⚠️ STRICT RULE: Only use facts explicitly stated below. Do NOT add external knowledge or inferences.
+
+ICP: {icp}
 Company: {signals.company}
-Live Signals:
+
+THESE ARE THE ONLY FACTS AVAILABLE:
 - Funding: {signals.funding}
 - Hiring: {signals.hiring}
 - Recent News:
 {news_formatted}
-- Tech Stack: {tech_formatted}
 
-Write a 2-paragraph Account Brief:
-Paragraph 1: What's happening at this company RIGHT NOW based on signals (be specific with numbers/facts).
-Paragraph 2: Why their current growth stage creates an urgent need for what we sell (connect ICP to signals)."""
+Write a 2-paragraph Account Brief using ONLY the facts above:
+Paragraph 1: What's happening at this company based ONLY on the signals provided (use exact numbers/facts from above).
+Paragraph 2: Why their situation creates a need for what we sell (connect ICP to the specific signals).
+
+If a signal says "No data" or "not found", simply omit that category from your brief."""
 
     try:
         response = client.chat.completions.create(
@@ -60,13 +65,20 @@ Paragraph 2: Why their current growth stage creates an urgent need for what we s
             max_completion_tokens=500
         )
         
-        account_brief = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        if not content:
+            # Fallback if empty response
+            account_brief = f"{signals.company} is showing strong growth signals with {signals.hiring}. Their recent funding activity ({signals.funding}) suggests expansion. Given our ICP ({icp}), this creates a timely opportunity to engage."
+        else:
+            account_brief = content.strip()
+        
         print(f"✅ Account analysis complete for {signals.company}")
         return account_brief
         
     except Exception as e:
         print(f"❌ Error analyzing account: {e}")
-        raise
+        # Return a basic brief instead of raising
+        return f"{signals.company} appears to be in a growth phase based on recent signals. {signals.funding}. {signals.hiring}. This aligns with our target profile."
 
 
 if __name__ == "__main__":

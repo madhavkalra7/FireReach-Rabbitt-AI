@@ -148,11 +148,6 @@ export default function App() {
                   title="Recent News"
                   items={state.result.signals?.news}
                 />
-                <SignalCard
-                  icon="🛠"
-                  title="Tech Stack"
-                  items={state.result.signals?.tech_stack}
-                />
               </div>
 
               <div className="section-label">Account Brief</div>
