@@ -7,6 +7,7 @@ import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
 import History from './pages/History'
 import Pricing from './pages/Pricing'
+import Creator from './pages/Creator'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -71,6 +72,7 @@ export default function App() {
         }
       />
       <Route path="/pricing" element={<Pricing />} />
+      <Route path="/creator" element={<Creator />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

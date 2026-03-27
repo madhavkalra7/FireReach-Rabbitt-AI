@@ -7,6 +7,7 @@ import FireParticles from '../components/FireParticles'
 import RotatingGlobe from '../components/RotatingGlobe'
 import GlowCard from '../components/GlowCard'
 import { InteractiveRobotSpline } from '../components/ui/interactive-3d-robot'
+import { TestimonialCarousel } from '../components/ui/profile-card-testimonial-carousel'
 
 const AGENTS = [
   { num: 1, icon: '🎯', name: 'Company Discovery', desc: 'Finds best-fit companies from your ICP automatically' },
@@ -42,6 +43,20 @@ const PLANS = [
     id: 'scale', name: 'Scale', price: '₹1,299', yearlyPrice: '₹10,999', period: '/month', credits: 1200,
     features: ['1200 credits/month', 'All features included', 'Unlimited contacts', 'Dedicated support', 'API access', 'Team seats (5 users)', 'Custom ICP templates'],
     highlight: false,
+  },
+]
+
+const CREATOR_PROFILE = [
+  {
+    name: 'Madhav Kalra',
+    title: 'Founder & Lead Engineer',
+    description:
+      'Building FireReach as a high-velocity autonomous outreach stack with live signal intelligence, ranking logic, and personalized outbound execution.',
+    imageUrl: '/mk.jpg',
+    instagramUrl: 'https://www.instagram.com/madhavkalra._/?hl=en',
+    emailUrl: 'mailto:madhavkalra2005@gmail.com',
+    linkedinUrl: 'https://www.linkedin.com/in/madhav-kalra',
+    websiteUrl: 'https://madhav-s-portfolio-one.vercel.app',
   },
 ]
 
@@ -114,7 +129,7 @@ export default function Landing() {
 
           <motion.p className="hero-sub" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}>
             Define your ICP. Deploy 7 autonomous AI agents. Get hyper-personalized
-            B2B outreach emails delivered to your inbox in under 2 minutes.
+            B2B outreach emails delivered to your inbox in under 1 minute.
             No manual research. No guessing. Just fire-and-forget results.
           </motion.p>
 
@@ -130,7 +145,7 @@ export default function Landing() {
             <span className="proof-divider">•</span>
             <span className="proof-item">15+ Data Sources</span>
             <span className="proof-divider">•</span>
-            <span className="proof-item">{'< 2 min per campaign'}</span>
+            <span className="proof-item">{'< 1 min per campaign'}</span>
           </motion.div>
         </div>
       </section>
@@ -283,6 +298,24 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* ═══ CREATOR ═══ */}
+      <section className="section-dark creator-preview-section" id="creator">
+        <div className="container creator-preview-wrap">
+          <h2 className="creator-section-title">
+            The Minds Behind <span className="creator-brand">FireReach</span>
+          </h2>
+          <p className="creator-section-subtitle">
+            A passionate team building the future of autonomous B2B outreach.
+          </p>
+
+          <TestimonialCarousel testimonials={CREATOR_PROFILE} className="creator-carousel-shell" />
+
+          <div className="creator-cta-row">
+            <Link to="/creator" className="btn-ghost btn-lg">Open Creator Page</Link>
+          </div>
+        </div>
+      </section>
+
       {/* ═══ FOOTER ═══ */}
       <footer className="footer">
         <div className="container footer-inner">
@@ -293,6 +326,7 @@ export default function Landing() {
           <div className="footer-links">
             <a href="#how-it-works">Features</a>
             <a href="#pricing">Pricing</a>
+            <Link to="/creator">Creator</Link>
             <Link to="/login">Login</Link>
             <Link to={getStartedPath}>Sign Up</Link>
           </div>
