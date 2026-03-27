@@ -1,187 +1,127 @@
-"""
-Signal Harvester Tool
-Fetches real-time signals about a target company using SerpAPI.
-"""
-import requests
-from typing import Optional
-import sys
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import requests
 
-from config import SERP_API_KEY
-from schemas import SignalData
+SIGNAL_QUERIES = {
+    "S1": {
+        "label": "Hiring signals",
+        "query": '"{company}" (hiring OR careers OR jobs OR expansion OR headcount)',
+        "news": False,
+    },
+    "S2": {
+        "label": "Funding signals",
+        "query": '"{company}" (funding OR investment OR investors OR series A OR series B OR raised)',
+        "news": True,
+    },
+    "S3": {
+        "label": "Leadership/People signals",
+        "query": '"{company}" (leadership OR appointed OR joined as OR chief executive OR executive team)',
+        "news": True,
+    },
+    "S4": {
+        "label": "Product launch signals",
+        "query": '"{company}" (launch OR launched OR release OR product update OR new feature)',
+        "news": True,
+    },
+    "S5": {
+        "label": "Tech stack signals",
+        "query": '"{company}" ("tech stack" OR infrastructure OR platform OR engineering OR developer tools)',
+        "news": False,
+    },
+    "S6": {
+        "label": "Market reputation signals",
+        "query": '"{company}" (reviews OR partnership OR customers OR reputation OR social mentions)',
+        "news": False,
+    },
+}
 
 
-SERP_API_BASE_URL = "https://serpapi.com/search"
+def _extract_signal_result(data: dict) -> dict:
+    for collection in ("news", "organic"):
+        for item in data.get(collection, []):
+            title = str(item.get("title", "")).strip()
+            snippet = str(item.get("snippet", "")).strip()
+            source = item.get("link") or item.get("displayed_link") or ""
 
+            if not source:
+                source_info = item.get("source")
+                if isinstance(source_info, dict):
+                    source = source_info.get("name", "")
+                elif isinstance(source_info, str):
+                    source = source_info
 
-def _search_google(query: str, num_results: int = 3) -> list[dict]:
-    """
-    Execute a Google search using SerpAPI.
-    
-    Args:
-        query: The search query string
-        num_results: Number of results to fetch
-    
-    Returns:
-        List of search result dictionaries
-    """
-    params = {
-        "q": query,
-        "api_key": SERP_API_KEY,
-        "engine": "google",
-        "num": num_results
+            content = ". ".join(part for part in [title, snippet] if part).strip()
+            if len(content) > 20:
+                return {
+                    "content": content,
+                    "source": source,
+                }
+
+    return {
+        "content": "",
+        "source": "",
     }
-    
-    try:
-        response = requests.get(SERP_API_BASE_URL, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("organic_results", [])
-    except requests.RequestException as e:
-        print(f"SerpAPI request failed for query '{query}': {e}")
-        return []
 
 
-def _extract_funding_info(results: list[dict]) -> str:
-    """Extract funding information from search results."""
-    if not results:
-        return "No recent funding information found"
-    
-    funding_keywords = ["raised", "funding", "series", "million", "billion", "valuation", "investment"]
-    
-    for result in results:
-        snippet = result.get("snippet", "").lower()
-        title = result.get("title", "").lower()
-        
-        for keyword in funding_keywords:
-            if keyword in snippet or keyword in title:
-                return result.get("snippet", "No details available")
-    
-    # Return first result if no specific funding match
-    return results[0].get("snippet", "No recent funding information found")
-
-
-def _extract_hiring_info(results: list[dict]) -> str:
-    """Extract hiring/jobs information from search results."""
-    if not results:
-        return "No current hiring signals found"
-    
-    hiring_keywords = ["hiring", "jobs", "positions", "openings", "engineers", "team", "growing"]
-    
-    for result in results:
-        snippet = result.get("snippet", "").lower()
-        title = result.get("title", "").lower()
-        
-        for keyword in hiring_keywords:
-            if keyword in snippet or keyword in title:
-                return result.get("snippet", "No details available")
-    
-    return results[0].get("snippet", "No current hiring signals found")
-
-
-def _extract_news(results: list[dict]) -> list[str]:
-    """Extract recent news headlines/snippets."""
-    if not results:
-        return ["No recent news found"]
-    
-    news_items = []
-    for result in results[:3]:  # Get top 3 news items
-        title = result.get("title", "")
-        snippet = result.get("snippet", "")
-        if title:
-            news_items.append(f"{title}: {snippet[:150]}..." if len(snippet) > 150 else f"{title}: {snippet}")
-    
-    return news_items if news_items else ["No recent news found"]
-
-
-def _extract_tech_stack(results: list[dict]) -> list[str]:
-    """Extract tech stack information from search results."""
-    if not results:
-        return ["Unknown tech stack"]
-    
-    tech_keywords = [
-        "react", "python", "node", "typescript", "javascript", "aws", "gcp", "azure",
-        "kubernetes", "docker", "postgres", "mongodb", "redis", "graphql", "rest",
-        "go", "rust", "java", "scala", "vercel", "next.js", "vue", "angular",
-        "terraform", "datadog", "elasticsearch", "kafka", "rabbitmq"
-    ]
-    
-    found_tech = set()
-    
-    for result in results:
-        snippet = result.get("snippet", "").lower()
-        title = result.get("title", "").lower()
-        combined = f"{snippet} {title}"
-        
-        for tech in tech_keywords:
-            if tech in combined:
-                found_tech.add(tech.capitalize() if not tech.isupper() else tech)
-    
-    return list(found_tech)[:8] if found_tech else ["Tech stack details not found in public data"]
-
-
-def harvest_signals(company: str) -> SignalData:
-    """
-    Harvest live signals about a target company using real SerpAPI searches.
-    Runs searches in PARALLEL for speed.
-    
-    Args:
-        company: Name of the target company
-    
-    Returns:
-        SignalData object containing harvested information
-    """
-    print(f"🔍 Harvesting signals for: {company}")
-    
-    # Define search queries
-    queries = {
-        "funding": f"{company} funding raised investment 2024 2025",
-        "hiring": f"{company} hiring jobs careers",
-        "news": f"{company} news announcement 2025"
+def _run_serp_query(params: dict, retries: int = 2, timeout_seconds: int = 30) -> dict:
+    last_error = None
+    endpoint = params["endpoint"]
+    headers = params["headers"]
+    payload = {
+        "q": params["q"],
+        "num": params["num"],
     }
-    
-    results = {}
-    
-    # Execute searches in PARALLEL for speed
-    print(f"  → Running 3 parallel searches...")
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        future_to_key = {
-            executor.submit(_search_google, query): key 
-            for key, query in queries.items()
+
+    for attempt in range(retries + 1):
+        try:
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=timeout_seconds)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+
+    raise last_error
+
+
+def tool_signal_harvester(company_name: str, website: str = "") -> dict:
+    """
+    Collects real company signals from Serper.dev and maps them into S1-S6 categories.
+    """
+    print(f"Executing tool_signal_harvester for {company_name}")
+
+    serper_api_key = os.getenv("SERPER_API_KEY")
+    if not serper_api_key or serper_api_key == "your_serper_api_key_here":
+        raise ValueError("SERPER_API_KEY is not configured. FireReach requires live signal harvesting.")
+
+    signals = {}
+
+    for signal_code, config in SIGNAL_QUERIES.items():
+        params = {
+            "q": config["query"].format(company=company_name),
+            "num": 5,
+            "headers": {
+                "X-API-KEY": serper_api_key,
+                "Content-Type": "application/json",
+            },
+            "endpoint": "https://google.serper.dev/news" if config["news"] else "https://google.serper.dev/search",
         }
-        
-        for future in as_completed(future_to_key):
-            key = future_to_key[future]
-            try:
-                results[key] = future.result()
-                print(f"  ✓ {key} search complete")
-            except Exception as e:
-                print(f"  ✗ {key} search failed: {e}")
-                results[key] = []
-    
-    # Parse and structure the results
-    signals = SignalData(
-        company=company,
-        funding=_extract_funding_info(results.get("funding", [])),
-        hiring=_extract_hiring_info(results.get("hiring", [])),
-        news=_extract_news(results.get("news", [])),
-        tech_stack=[]
-    )
-    
-    print(f"✅ Signal harvesting complete for {company}")
+
+        try:
+            raw_payload = _run_serp_query(params)
+            result = _extract_signal_result(raw_payload)
+        except requests.RequestException as exc:
+            # Keep workflow alive on network/timeouts without inventing synthetic signal text.
+            result = {
+                "content": "",
+                "source": "",
+                "error": str(exc),
+            }
+
+        result["label"] = config["label"]
+        result["website"] = website
+        signals[signal_code] = result
+
     return signals
-
-
-if __name__ == "__main__":
-    # Test the signal harvester
-    test_signals = harvest_signals("Vercel")
-    print("\n--- Harvested Signals ---")
-    print(f"Company: {test_signals.company}")
-    print(f"Funding: {test_signals.funding}")
-    print(f"Hiring: {test_signals.hiring}")
-    print(f"News: {test_signals.news}")
-    print(f"Tech Stack: {test_signals.tech_stack}")

@@ -31,3 +31,9 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Local fallback auth storage
+backend/.local_auth_users.json
+
+# Generated Prisma Python client
+backend/prisma_client/

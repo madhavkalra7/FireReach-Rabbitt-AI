@@ -1,71 +1,47 @@
-import { useEffect, useState } from 'react'
-
-const STEPS = {
-  tool_signal_harvester: { icon: '🔍', name: 'Signal Harvest', desc: 'Fetching live company data' },
-  tool_research_analyst: { icon: '🧠', name: 'Account Analysis', desc: 'Analyzing strategic fit' },
-  tool_outreach_automated_sender: { icon: '📧', name: 'Email Dispatch', desc: 'Generating and sending' }
+const AGENT_INFO = {
+  agent1_discovery: { icon: '🎯', name: 'Company Discovery', desc: 'Finding best-fit companies' },
+  agent2_signals: { icon: '📡', name: 'Signal Harvesting', desc: 'Pulling 6 signal types' },
+  agent3_verifier: { icon: '✅', name: 'Signal Verification', desc: 'Cross-checking accuracy' },
+  agent4_scorer: { icon: '🏆', name: 'ICP Scoring', desc: 'Scoring 0-100 for fit' },
+  agent5_ranker: { icon: '🥇', name: 'Company Ranking', desc: 'Ranking top targets' },
+  agent6_contacts: { icon: '👥', name: 'Contact Finding', desc: 'Finding decision makers' },
+  agent7_outreach: { icon: '📧', name: 'Outreach Generation', desc: 'Writing personalized emails' },
 }
 
-export default function AgentTimeline({ steps }) {
-  const [times, setTimes] = useState({})
-  const [starts, setStarts] = useState({})
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now()
-      const newTimes = {}
-
-      steps.forEach((step) => {
-        if (step.status === 'running') {
-          if (!starts[step.tool_name]) {
-            setStarts((s) => ({ ...s, [step.tool_name]: now }))
-          }
-          newTimes[step.tool_name] = ((now - (starts[step.tool_name] || now)) / 1000).toFixed(1)
-        } else if (step.status === 'completed' && times[step.tool_name]) {
-          newTimes[step.tool_name] = times[step.tool_name]
-        }
-      })
-
-      setTimes((t) => ({ ...t, ...newTimes }))
-    }, 100)
-
-    return () => clearInterval(interval)
-  }, [steps, starts, times])
-
-  const displaySteps = steps.length ? steps : [
-    { tool_name: 'tool_signal_harvester', status: 'pending' },
-    { tool_name: 'tool_research_analyst', status: 'pending' },
-    { tool_name: 'tool_outreach_automated_sender', status: 'pending' }
-  ]
-
+export default function AgentTimeline({ steps = [] }) {
   return (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-icon">📊</div>
-        <h2 className="card-title">Agent Timeline</h2>
-      </div>
-
+    <div className="card timeline-card">
+      <h3 className="card-title">Agent Pipeline</h3>
       <div className="timeline">
-        {displaySteps.map((step) => {
-          const config = STEPS[step.tool_name] || { icon: '⚙️', name: step.tool_name, desc: '' }
-          
+        {steps.map((step, i) => {
+          const info = AGENT_INFO[step.tool_name] || { icon: '⚙️', name: step.tool_name, desc: '' }
+          const isDone = step.status === 'done' || step.status === 'completed'
+          const isRunning = step.status === 'running'
+          const isPending = step.status === 'pending'
+
           return (
-            <div key={step.tool_name} className={`timeline-step ${step.status}`}>
-              <div className="step-icon">
-                {step.status === 'running' ? <span className="spinner" /> : config.icon}
-              </div>
-              <div className="step-info">
-                <div className="step-name">{config.name}</div>
-                <div className="step-status">
-                  {step.status === 'completed' && '✓ Complete'}
-                  {step.status === 'running' && config.desc}
-                  {step.status === 'pending' && 'Waiting...'}
-                  {step.status === 'failed' && '✗ Failed'}
+            <div key={i} className={`timeline-step ${isDone ? 'step-done' : isRunning ? 'step-running' : 'step-pending'}`}>
+              <div className="step-indicator">
+                <div className={`step-circle ${isDone ? 'circle-done' : isRunning ? 'circle-running' : ''}`}>
+                  {isDone ? '✓' : i + 1}
                 </div>
+                {i < steps.length - 1 && <div className="step-line" />}
               </div>
-              {times[step.tool_name] && (
-                <div className="step-time">{times[step.tool_name]}s</div>
-              )}
+              <div className="step-content">
+                <div className="step-header">
+                  <span className="step-icon">{info.icon}</span>
+                  <span className="step-name">{info.name}</span>
+                </div>
+                <p className="step-desc">
+                  {isDone ? (
+                    <span className="text-success">Complete</span>
+                  ) : isRunning ? (
+                    <span className="text-running">Processing...</span>
+                  ) : (
+                    <span className="text-muted">{info.desc}</span>
+                  )}
+                </p>
+              </div>
             </div>
           )
         })}

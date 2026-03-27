@@ -1,400 +1,651 @@
-"""
-FireReach Agent
-Agentic loop using OpenAI function calling for autonomous outreach.
-"""
+import asyncio
 import json
-import time
-from openai import OpenAI
+import os
+from urllib.parse import urlparse
 
-from config import OPENAI_API_KEY
-from schemas import OutreachRequest, OutreachResponse, SignalData, AgentStep
-from tools.signal_harvester import harvest_signals
-from tools.research_analyst import analyze_account
-from tools.outreach_sender import write_and_send_email
+import requests
 
+from services.groq_client import generate_completion
+from services.signal_verifier import verify_signals
+from tools.email_finder import tool_email_finder
+from tools.outreach_sender import send_prepared_email
+from tools.outreach_sender import tool_outreach_automated_sender
+from tools.research_analyst import tool_research_analyst
+from tools.signal_harvester import tool_signal_harvester
 
-# Initialize OpenAI client with timeout
-client = OpenAI(
-    api_key=OPENAI_API_KEY,
-    timeout=30.0,  # 30 second timeout for API calls
-    max_retries=1  # Only 1 retry to avoid long waits
-)
-
-
-# Agent system prompt
-AGENT_SYSTEM_PROMPT = """You are FireReach, an autonomous B2B outreach agent. You operate with precision and always ground your outreach in real, harvested data.
-
-Your persona: Strategic, efficient, data-driven. You never guess — you research first.
-
-Your constraints:
-1. ALWAYS call tool_signal_harvester first before any analysis
-2. ALWAYS call tool_research_analyst before writing any email
-3. ALWAYS call tool_outreach_automated_sender to send — never just draft
-4. Never fabricate signals — only use what tool_signal_harvester returns
-5. The email MUST reference specific signals (numbers, facts, names)
-6. Complete all 3 tool calls sequentially — never skip steps"""
-
-
-# Tool definitions in OpenAI function calling format
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "tool_signal_harvester",
-            "description": "Harvest real-time signals about a target company including funding, hiring activity, recent news, and tech stack. This tool makes real API calls to search engines to get live data. MUST be called first before any analysis.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "company": {
-                        "type": "string",
-                        "description": "The name of the target company to research (e.g., 'Vercel', 'Stripe', 'Notion')"
-                    }
-                },
-                "required": ["company"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "tool_research_analyst",
-            "description": "Analyze harvested signals against the ICP and generate a 2-paragraph account brief. MUST be called after signal harvesting and before writing the email.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "signals": {
-                        "type": "object",
-                        "description": "The SignalData object returned from tool_signal_harvester",
-                        "properties": {
-                            "company": {"type": "string"},
-                            "funding": {"type": "string"},
-                            "hiring": {"type": "string"},
-                            "news": {"type": "array", "items": {"type": "string"}},
-                            "tech_stack": {"type": "array", "items": {"type": "string"}}
-                        },
-                        "required": ["company", "funding", "hiring", "news", "tech_stack"]
-                    },
-                    "icp": {
-                        "type": "string",
-                        "description": "The Ideal Customer Profile description"
-                    }
-                },
-                "required": ["signals", "icp"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "tool_outreach_automated_sender",
-            "description": "Write a hyper-personalized cold outreach email based on signals and account brief, then automatically send it via email. This tool both generates AND sends the email.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "signals": {
-                        "type": "object",
-                        "description": "The SignalData object from tool_signal_harvester",
-                        "properties": {
-                            "company": {"type": "string"},
-                            "funding": {"type": "string"},
-                            "hiring": {"type": "string"},
-                            "news": {"type": "array", "items": {"type": "string"}},
-                            "tech_stack": {"type": "array", "items": {"type": "string"}}
-                        },
-                        "required": ["company", "funding", "hiring", "news", "tech_stack"]
-                    },
-                    "account_brief": {
-                        "type": "string",
-                        "description": "The account brief from tool_research_analyst"
-                    },
-                    "icp": {
-                        "type": "string",
-                        "description": "The Ideal Customer Profile description"
-                    },
-                    "recipient_email": {
-                        "type": "string",
-                        "description": "The email address to send the outreach to"
-                    }
-                },
-                "required": ["signals", "account_brief", "icp", "recipient_email"]
-            }
-        }
-    }
+STEP_DEFINITIONS = [
+    ("step1", "Finding companies..."),
+    ("step2", "Harvesting signals..."),
+    ("step3", "Verifying signals..."),
+    ("step4", "Analyzing research..."),
+    ("step5", "Selecting best company..."),
+    ("step6", "Finding emails..."),
+    ("step7", "Sending outreach..."),
 ]
 
+ANSI_RESET = "\033[0m"
+ANSI_BOLD = "\033[1m"
+ANSI_DIM = "\033[2m"
+ANSI_BLUE = "\033[94m"
+ANSI_GREEN = "\033[92m"
+ANSI_YELLOW = "\033[93m"
+ANSI_RED = "\033[91m"
+ANSI_MAGENTA = "\033[95m"
 
-def execute_tool(tool_name: str, arguments: dict) -> dict:
-    """
-    Execute a tool by name with the given arguments.
-    
-    Args:
-        tool_name: Name of the tool to execute
-        arguments: Dictionary of arguments for the tool
-    
-    Returns:
-        Dictionary containing the tool result
-    """
-    print(f"🔧 Executing tool: {tool_name}")
-    
-    if tool_name == "tool_signal_harvester":
-        company = arguments.get("company")
-        signals = harvest_signals(company)
-        return signals.model_dump()
-    
-    elif tool_name == "tool_research_analyst":
-        signals_dict = arguments.get("signals")
-        icp = arguments.get("icp")
-        signals = SignalData(**signals_dict)
-        account_brief = analyze_account(signals, icp)
-        return {"account_brief": account_brief}
-    
-    elif tool_name == "tool_outreach_automated_sender":
-        signals_dict = arguments.get("signals")
-        account_brief = arguments.get("account_brief")
-        icp = arguments.get("icp")
-        recipient_email = arguments.get("recipient_email")
-        signals = SignalData(**signals_dict)
-        result = write_and_send_email(signals, account_brief, icp, recipient_email)
-        return result
-    
-    else:
-        raise ValueError(f"Unknown tool: {tool_name}")
+GENERIC_INBOX_PREFIXES = {
+    "info",
+    "contact",
+    "hello",
+    "hi",
+    "sales",
+    "support",
+    "team",
+    "office",
+    "admin",
+    "careers",
+    "jobs",
+    "hr",
+    "help",
+    "enquiries",
+    "inquiries",
+    "marketing",
+}
+
+SIGNAL_WEIGHTS = {
+    "S2": 20,
+    "S1": 18,
+    "S4": 17,
+    "S3": 15,
+    "S5": 15,
+    "S6": 15,
+}
 
 
-def run_agent_fast(request: OutreachRequest) -> OutreachResponse:
-    """
-    FAST direct execution mode - bypasses agentic loop overhead.
-    Runs all 3 tools sequentially without OpenAI decision-making.
-    """
-    total_start = time.time()
-    
-    print(f"\n{'='*60}")
-    print(f"⚡ FireReach FAST Mode")
-    print(f"   Company: {request.company}")
-    print(f"   Recipient: {request.recipient_email}")
-    print(f"{'='*60}\n")
-    
-    steps = []
-    
-    # Step 1: Harvest signals
-    print("\n[1/3] Harvesting signals...")
-    step1 = AgentStep(tool_name="tool_signal_harvester", status="running", result={})
-    signals_data = harvest_signals(request.company)
-    step1.status = "completed"
-    step1.result = signals_data.model_dump()
-    steps.append(step1)
-    print(f"   ✅ Signals harvested")
-    
-    # Step 2: Analyze account
-    print("\n[2/3] Analyzing account...")
-    step2 = AgentStep(tool_name="tool_research_analyst", status="running", result={})
-    account_brief = analyze_account(signals_data, request.icp)
-    step2.status = "completed"
-    step2.result = {"account_brief": account_brief}
-    steps.append(step2)
-    print(f"   ✅ Account analyzed")
-    
-    # Step 3: Write and send email
-    print("\n[3/3] Writing and sending email...")
-    step3 = AgentStep(tool_name="tool_outreach_automated_sender", status="running", result={})
-    email_result = write_and_send_email(
-        signals_data, 
-        account_brief, 
-        request.icp, 
-        request.recipient_email
+def _extract_json_array(text: str) -> list:
+    cleaned = str(text or "").strip()
+    start = cleaned.find("[")
+    end = cleaned.rfind("]")
+
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("LLM response did not contain a JSON array.")
+
+    payload = cleaned[start:end + 1]
+    return json.loads(payload)
+
+
+def _normalize_website(website: str) -> str:
+    value = str(website or "").strip()
+    if not value:
+        return ""
+    if not value.startswith(("http://", "https://")):
+        value = f"https://{value}"
+    return value
+
+
+def _domain_from_website(website: str) -> str:
+    normalized = _normalize_website(website)
+    if not normalized:
+        return ""
+
+    parsed = urlparse(normalized)
+    domain = parsed.netloc.lower().strip()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    return domain
+
+
+def _company_logo_from_domain(domain: str) -> str:
+    cleaned = str(domain or "").strip().lower()
+    if not cleaned:
+        return ""
+    # Use logo.dev API for company logos
+    return f"https://logo.dev/api/v1/{cleaned}?size=256&rounded=true"
+
+
+def _company_icon_from_domain(domain: str) -> str:
+    cleaned = str(domain or "").strip().lower()
+    if not cleaned:
+        return ""
+    return f"https://www.google.com/s2/favicons?domain={cleaned}&sz=128"
+
+
+def _is_org_inbox_email(email: str) -> bool:
+    value = str(email or "").strip().lower()
+    if "@" not in value:
+        return True
+    local_part = value.split("@", 1)[0]
+    return local_part in GENERIC_INBOX_PREFIXES
+
+
+def _confidence_to_score(confidence) -> int:
+    value = str(confidence or "").strip().lower()
+    if value.isdigit():
+        return max(0, min(100, int(value)))
+    if value == "high":
+        return 90
+    if value == "medium":
+        return 70
+    if value == "low":
+        return 40
+    return 0
+
+
+def _pick_best_contact(contacts: list) -> dict:
+    if not isinstance(contacts, list) or not contacts:
+        return {}
+
+    valid_contacts = [contact for contact in contacts if isinstance(contact, dict) and contact.get("email")]
+    if not valid_contacts:
+        return {}
+
+    ranked = sorted(
+        valid_contacts,
+        key=lambda contact: (
+            0 if not _is_org_inbox_email(contact.get("email", "")) else 1,
+            -_confidence_to_score(contact.get("confidence")),
+            str(contact.get("email", "")).lower(),
+        ),
     )
-    step3.status = "completed"
-    step3.result = email_result
-    steps.append(step3)
-    print(f"   ✅ Email generated")
-    
-    total_time = time.time() - total_start
-    
-    response = OutreachResponse(
-        signals=signals_data,
-        account_brief=account_brief,
-        email_subject=email_result.get("subject", ""),
-        email_body=email_result.get("body", ""),
-        sent=email_result.get("sent", False),
-        steps=steps
+    return ranked[0]
+
+
+def _find_target_companies(icp: str) -> list:
+    prompt = f"""
+You are FireReach's company discovery agent.
+Analyze the Ideal Customer Profile below and return exactly 5 real companies that best match it.
+
+Ideal Customer Profile:
+{icp}
+
+Requirements:
+- Output exactly 5 companies.
+- Use real, valid company names and official websites.
+- Keep reasons professional, specific, and original.
+- Return only a JSON array.
+- Every object must include: company_name, industry, reason, website.
+- Do not include markdown or commentary.
+"""
+
+    companies = _extract_json_array(
+        generate_completion(
+            prompt=prompt,
+            system_prompt="You are a precise B2B market research analyst.",
+            temperature=0.2,
+            max_tokens=900,
+        )
     )
-    
-    print(f"\n{'='*60}")
-    print(f"⚡ FireReach Complete in {total_time:.1f}s")
-    print(f"{'='*60}\n")
-    
-    return response
+
+    normalized_companies = []
+    seen_names = set()
+
+    for company in companies:
+        company_name = str(company.get("company_name", "")).strip()
+        if not company_name:
+            continue
+
+        dedupe_key = company_name.lower()
+        if dedupe_key in seen_names:
+            continue
+        seen_names.add(dedupe_key)
+
+        website = _normalize_website(company.get("website", ""))
+        normalized_companies.append(
+            {
+                "company_name": company_name,
+                "industry": str(company.get("industry", "")).strip(),
+                "reason": str(company.get("reason", "")).strip(),
+                "website": website,
+                "domain": _domain_from_website(website),
+                "company_logo": _company_logo_from_domain(_domain_from_website(website)),
+                "company_icon": _company_icon_from_domain(_domain_from_website(website)),
+            }
+        )
+
+    if len(normalized_companies) != 5:
+        raise ValueError("Company finder must return exactly 5 valid companies.")
+
+    return normalized_companies
 
 
-def run_agent(request: OutreachRequest) -> OutreachResponse:
-    """
-    Run the FireReach agentic loop.
-    
-    Args:
-        request: OutreachRequest with ICP, company, and recipient email
-    
-    Returns:
-        OutreachResponse with all results and steps
-    """
-    print(f"\n{'='*60}")
-    print(f"🚀 FireReach Agent Starting")
-    print(f"   Company: {request.company}")
-    print(f"   ICP: {request.icp[:50]}...")
-    print(f"   Recipient: {request.recipient_email}")
-    print(f"{'='*60}\n")
-    
-    # Initialize conversation
-    messages = [
-        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
-        {
-            "role": "user", 
-            "content": f"""Execute the full outreach pipeline for:
-- Target Company: {request.company}
-- ICP: {request.icp}
-- Recipient Email: {request.recipient_email}
+def _discover_company_website(company_name: str) -> str:
+    serper_api_key = os.getenv("SERPER_API_KEY")
+    if not serper_api_key or serper_api_key == "your_serper_api_key_here":
+        return ""
 
-Follow the exact sequence:
-1. First call tool_signal_harvester to get real data about {request.company}
-2. Then call tool_research_analyst with the signals and ICP
-3. Finally call tool_outreach_automated_sender to write and send the email
+    try:
+        response = requests.post(
+            "https://google.serper.dev/search",
+            json={
+                "q": f"{company_name} official website",
+                "num": 5,
+            },
+            headers={
+                "X-API-KEY": serper_api_key,
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-Begin now."""
+        for result in data.get("organic", []):
+            link = str(result.get("link", "")).strip()
+            if link and "wikipedia.org" not in link.lower():
+                return _normalize_website(link)
+    except requests.RequestException:
+        return ""
+
+    return ""
+
+
+def _signal_strength_score(verified_signals: dict) -> float:
+    total = float(sum(SIGNAL_WEIGHTS.values()))
+    if total <= 0:
+        return 0.0
+
+    gained = 0.0
+    for signal_code, weight in SIGNAL_WEIGHTS.items():
+        value = verified_signals.get(signal_code) if isinstance(verified_signals, dict) else None
+        if isinstance(value, dict):
+            content = str(value.get("content", "")).strip()
+            if content:
+                gained += weight
+        elif isinstance(value, list):
+            if any(str(item or "").strip() for item in value):
+                gained += weight
+        elif isinstance(value, str) and value.strip():
+            gained += weight
+
+    return round((gained / total) * 100, 2)
+
+
+def _compact_signals_for_prompt(verified_signals: dict) -> dict:
+    compact = {}
+    if not isinstance(verified_signals, dict):
+        return compact
+
+    for code in SIGNAL_WEIGHTS.keys():
+        signal = verified_signals.get(code)
+        if isinstance(signal, dict):
+            content = str(signal.get("content", "")).strip()
+            if content:
+                compact[code] = content
+        elif isinstance(signal, str) and signal.strip():
+            compact[code] = signal.strip()
+        elif isinstance(signal, list):
+            merged = "; ".join(str(item).strip() for item in signal if str(item or "").strip())
+            if merged:
+                compact[code] = merged
+
+    return compact
+
+
+def _score_icp_matches_single_call(companies: list, icp: str) -> dict:
+    payload = []
+    for company in companies:
+        payload.append(
+            {
+                "company_name": company.get("company_name", ""),
+                "industry": company.get("industry", ""),
+                "reason": company.get("reason", ""),
+                "verified_signals": _compact_signals_for_prompt(company.get("verified_signals", {})),
+                "account_brief": company.get("account_brief", ""),
+            }
+        )
+
+    prompt = f"""
+You are FireReach's ICP scoring agent.
+Score each company against the ICP on a 0-100 scale.
+
+ICP:
+{icp}
+
+Companies:
+{json.dumps(payload, ensure_ascii=True)}
+
+Return ONLY a JSON array with exactly these fields per object:
+- company_name
+- icp_score (number 0-100)
+- reason (short, specific)
+
+Rules:
+- Keep one object for each company.
+- Base score on ICP fit using verified signals + research brief.
+- No markdown.
+"""
+
+    raw = generate_completion(
+        prompt=prompt,
+        system_prompt="You are a strict B2B ICP evaluator that returns only valid JSON.",
+        temperature=0.1,
+        max_tokens=1200,
+    )
+    try:
+        scored = _extract_json_array(raw)
+    except Exception as e:
+        print("[LLM SCORING ERROR] Could not parse LLM response:", e)
+        print("[LLM RAW RESPONSE]", raw)
+        # Fallback: assign 0 scores, but include raw for debugging
+        return {c.get("company_name", "").strip().lower(): {"icp_score": 0, "reason": f"LLM error: {e}. Raw: {raw}"} for c in companies}
+
+    score_map = {}
+    for item in scored:
+        name = str(item.get("company_name", "")).strip()
+        if not name:
+            continue
+        try:
+            icp_score = float(item.get("icp_score", 0))
+        except (TypeError, ValueError):
+            icp_score = 0.0
+        icp_score = max(0.0, min(100.0, icp_score))
+        score_map[name.lower()] = {
+            "icp_score": round(icp_score, 2),
+            "reason": str(item.get("reason", "")).strip(),
         }
-    ]
-    
-    # Track agent steps and results
-    steps = []
-    signals_data = None
-    account_brief = ""
-    email_subject = ""
-    email_body = ""
-    sent = False
-    
-    # Agentic loop
-    max_iterations = 5  # Safety limit - 3 tools + 2 buffer
-    iteration = 0
-    
-    while iteration < max_iterations:
-        iteration += 1
-        print(f"\n--- Agent Iteration {iteration} ---")
-        
-        # Call OpenAI with function calling
-        response = client.chat.completions.create(
-            model="gpt-5-mini-2025-08-07",
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto"
+
+    return score_map
+
+
+def _select_best_company(companies: list, icp: str) -> tuple[list, dict]:
+    if not companies:
+        return [], {}
+
+    try:
+        icp_score_map = _score_icp_matches_single_call(companies, icp)
+    except Exception:
+        icp_score_map = {}
+
+    ranked_rows = []
+    for company in companies:
+        signal_score = _signal_strength_score(company.get("verified_signals", {}))
+        mapped = icp_score_map.get(str(company.get("company_name", "")).strip().lower(), {})
+        icp_score = float(mapped.get("icp_score", 50.0))
+        final_score = round((signal_score * 0.4) + (icp_score * 0.6), 2)
+
+        ranked_rows.append(
+            {
+                "company_name": company.get("company_name", ""),
+                "company_logo": company.get("company_logo", ""),
+                "company_icon": company.get("company_icon", ""),
+                "signal_score": round(signal_score, 2),
+                "icp_score": round(icp_score, 2),
+                "final_score": final_score,
+                "score_reason": mapped.get("reason", ""),
+            }
         )
-        
-        assistant_message = response.choices[0].message
-        
-        # Check if there are tool calls
-        if assistant_message.tool_calls:
-            # Add assistant message to conversation
-            messages.append(assistant_message)
-            
-            # Process each tool call
-            for tool_call in assistant_message.tool_calls:
-                tool_name = tool_call.function.name
-                arguments = json.loads(tool_call.function.arguments)
-                
-                print(f"\n🎯 Tool call: {tool_name}")
-                print(f"   Arguments: {json.dumps(arguments, indent=2)[:200]}...")
-                
-                # Record step as running
-                step = AgentStep(
-                    tool_name=tool_name,
-                    status="running",
-                    result={}
-                )
-                
-                try:
-                    # Execute the tool
-                    result = execute_tool(tool_name, arguments)
-                    
-                    # Update step status
-                    step.status = "completed"
-                    step.result = result
-                    
-                    # Store important results
-                    if tool_name == "tool_signal_harvester":
-                        signals_data = SignalData(**result)
-                    elif tool_name == "tool_research_analyst":
-                        account_brief = result.get("account_brief", "")
-                    elif tool_name == "tool_outreach_automated_sender":
-                        email_subject = result.get("subject", "")
-                        email_body = result.get("body", "")
-                        sent = result.get("sent", False)
-                    
-                    # Add tool result to conversation
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(result)
-                    })
-                    
-                except Exception as e:
-                    print(f"❌ Tool execution error: {e}")
-                    step.status = "failed"
-                    step.result = {"error": str(e)}
-                    
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps({"error": str(e)})
-                    })
-                
-                steps.append(step)
-        
+
+    ranked_rows.sort(key=lambda row: (-row["final_score"], -row["icp_score"], row["company_name"].lower()))
+
+    for index, row in enumerate(ranked_rows, start=1):
+        row["rank"] = index
+        row["selected"] = index == 1
+
+    selected_name = ranked_rows[0]["company_name"] if ranked_rows else ""
+    selected_company = next((company for company in companies if company.get("company_name") == selected_name), {})
+
+    return ranked_rows, selected_company
+
+
+async def _notify(progress_callback, step: str, status: str, message: str, data=None):
+    color = ANSI_BLUE
+    if status == "completed":
+        color = ANSI_GREEN
+    elif status == "failed":
+        color = ANSI_RED
+    elif status == "in-progress":
+        color = ANSI_YELLOW
+
+    step_label = step.upper() if step else "WORKFLOW"
+    print(f"{ANSI_DIM}[pipeline]{ANSI_RESET} {color}{ANSI_BOLD}{step_label:<7}{ANSI_RESET} {ANSI_MAGENTA}{status:<11}{ANSI_RESET} {message}")
+
+    if not progress_callback:
+        return
+
+    payload = {
+        "step": step,
+        "status": status,
+        "message": message,
+    }
+    if data is not None:
+        payload["data"] = data
+
+    await progress_callback(payload)
+
+
+async def _run_email_and_outreach_for_company(icp: str, company: dict, send_now: bool, forced_recipient_email: str = "") -> dict:
+    working = dict(company)
+
+    contacts = await asyncio.to_thread(
+        tool_email_finder,
+        working.get("company_name", ""),
+        working.get("website", ""),
+        icp,
+    )
+    working["contacts"] = contacts
+    suggested_contact = _pick_best_contact(contacts)
+    override_email = str(forced_recipient_email or "").strip()
+    if send_now and override_email:
+        suggested_contact = {
+            **(suggested_contact or {}),
+            "email": override_email,
+        }
+    working["suggested_contact"] = suggested_contact
+    working["selected_contact"] = suggested_contact if send_now else {}
+
+    outreach = await asyncio.to_thread(
+        tool_outreach_automated_sender,
+        suggested_contact,
+        working.get("company_name", ""),
+        working.get("account_brief", ""),
+        working.get("verified_signals", {}),
+        icp,
+        send_now,
+    )
+    working["outreach"] = outreach
+    return working
+
+
+async def run_agent_workflow(icp: str, send_mode: str = "auto", target_company: str = "", test_recipient_email: str = "", progress_callback=None) -> dict:
+    """
+    Runs the FireReach workflow with company ranking and one-company outreach execution.
+    """
+    normalized_send_mode = str(send_mode or "auto").strip().lower()
+    if normalized_send_mode not in {"auto", "manual"}:
+        raise ValueError("Invalid send_mode. Use 'auto' or 'manual'.")
+
+    print(f"{ANSI_DIM}[pipeline]{ANSI_RESET} {ANSI_BLUE}{ANSI_BOLD}START  {ANSI_RESET} ICP run started | send_mode={normalized_send_mode}")
+
+    normalized_target_company = str(target_company or "").strip()
+    if normalized_target_company:
+        await _notify(progress_callback, "step1", "in-progress", "Using your selected target company.")
+        website = await asyncio.to_thread(_discover_company_website, normalized_target_company)
+        companies = [
+            {
+                "company_name": normalized_target_company,
+                "industry": "User selected",
+                "reason": "User requested outreach for this specific company.",
+                "website": website,
+                "domain": _domain_from_website(website),
+                "company_logo": _company_logo_from_domain(_domain_from_website(website)),
+                "company_icon": _company_icon_from_domain(_domain_from_website(website)),
+            }
+        ]
+        await _notify(progress_callback, "step1", "completed", "Target company locked from user input.", {"companies": companies})
+    else:
+        await _notify(progress_callback, "step1", "in-progress", "Finding companies that match the ICP.")
+        companies = await asyncio.to_thread(_find_target_companies, icp)
+        await _notify(progress_callback, "step1", "completed", f"Found {len(companies)} companies.", {"companies": companies})
+
+    await _notify(progress_callback, "step2", "in-progress", "Harvesting live signals for all companies.")
+    harvested_signals = await asyncio.gather(
+        *(asyncio.to_thread(tool_signal_harvester, company["company_name"], company.get("website", "")) for company in companies)
+    )
+    for company, signals in zip(companies, harvested_signals):
+        company["harvested_signals"] = signals
+    await _notify(progress_callback, "step2", "completed", "Signal harvesting completed for all companies.")
+
+    await _notify(progress_callback, "step3", "in-progress", "Verifying harvested signals.")
+    verified_sets = await asyncio.gather(
+        *(asyncio.to_thread(verify_signals, company.get("harvested_signals", {})) for company in companies)
+    )
+    for company, verified_signals in zip(companies, verified_sets):
+        company["verified_signals"] = verified_signals
+        company["signal_categories"] = list(verified_signals.keys())
+    await _notify(progress_callback, "step3", "completed", "Signal verification completed.")
+
+    await _notify(progress_callback, "step4", "in-progress", "Generating account briefs from verified signals.")
+    briefs = await asyncio.gather(
+        *(
+            asyncio.to_thread(
+                tool_research_analyst,
+                icp,
+                company.get("verified_signals", {}),
+                company_name=company["company_name"],
+            )
+            for company in companies
+        )
+    )
+    for company, account_brief in zip(companies, briefs):
+        company["account_brief"] = account_brief
+    await _notify(progress_callback, "step4", "completed", "Research briefs generated.")
+
+    await _notify(progress_callback, "step5", "in-progress", "Scoring and selecting best company.")
+    rankings, selected_company = await asyncio.to_thread(_select_best_company, companies, icp)
+    selected_company_name = selected_company.get("company_name", "")
+    await _notify(
+        progress_callback,
+        "step5",
+        "completed",
+        f"Selected {selected_company_name} as rank 1.",
+        {"rankings": rankings, "selected_company_name": selected_company_name},
+    )
+
+    if normalized_send_mode == "manual":
+        return {
+            "status": "awaiting_company_selection",
+            "send_mode": normalized_send_mode,
+            "icp": icp,
+            "companies": companies,
+            "rankings": rankings,
+            "selected_company_name": "",
+            "summary": {
+                "company_count": len(companies),
+                "emails_sent": 0,
+                "emails_failed": 0,
+                "emails_pending_manual": 0,
+                "steps": [{"step": step, "label": label} for step, label in STEP_DEFINITIONS],
+            },
+        }
+
+    await _notify(progress_callback, "step6", "in-progress", "Finding emails for the selected company.")
+    processed_company = await _run_email_and_outreach_for_company(
+        icp=icp,
+        company=selected_company,
+        send_now=True,
+        forced_recipient_email=test_recipient_email,
+    )
+    await _notify(
+        progress_callback,
+        "step6",
+        "completed",
+        "Contact discovery completed for selected company.",
+        {
+            "selected_company": {
+                "company_name": processed_company.get("company_name", ""),
+                "industry": processed_company.get("industry", ""),
+                "website": processed_company.get("website", ""),
+                "company_logo": processed_company.get("company_logo", ""),
+                "company_icon": processed_company.get("company_icon", ""),
+            },
+            "contacts": processed_company.get("contacts", []),
+            "suggested_contact": processed_company.get("suggested_contact", {}),
+            "selected_contact": processed_company.get("selected_contact", {}),
+            "test_recipient_override": str(test_recipient_email or "").strip(),
+        },
+    )
+
+    await _notify(progress_callback, "step7", "in-progress", "Sending outreach for selected company.")
+    outreach = processed_company.get("outreach", {})
+    sent_count = 1 if outreach.get("status") == "sent" else 0
+    await _notify(
+        progress_callback,
+        "step7",
+        "completed" if sent_count else "failed",
+        "Outreach send completed." if sent_count else "Outreach send failed.",
+        {
+            "selected_company_name": processed_company.get("company_name", ""),
+            "outreach": processed_company.get("outreach", {}),
+            "recipient": processed_company.get("outreach", {}).get("recipient", ""),
+        },
+    )
+
+    merged_companies = []
+    for company in companies:
+        if company.get("company_name") == processed_company.get("company_name"):
+            merged_companies.append(processed_company)
         else:
-            # No more tool calls - agent is done
-            print(f"\n✅ Agent completed all tool calls")
-            if assistant_message.content:
-                print(f"Final message: {assistant_message.content[:200]}...")
-            break
-    
-    # Build response
-    if signals_data is None:
-        # Fallback if signals weren't harvested (shouldn't happen)
-        signals_data = SignalData(
-            company=request.company,
-            funding="No data harvested",
-            hiring="No data harvested",
-            news=["No data harvested"],
-            tech_stack=["No data harvested"]
-        )
-    
-    response = OutreachResponse(
-        signals=signals_data,
-        account_brief=account_brief,
-        email_subject=email_subject,
-        email_body=email_body,
-        sent=sent,
-        steps=steps
-    )
-    
-    print(f"\n{'='*60}")
-    print(f"🏁 FireReach Agent Complete")
-    print(f"   Steps completed: {len(steps)}")
-    print(f"   Email sent: {sent}")
-    print(f"{'='*60}\n")
-    
-    return response
+            merged = dict(company)
+            merged["contacts"] = []
+            merged["suggested_contact"] = {}
+            merged["selected_contact"] = {}
+            merged["outreach"] = {
+                "status": "not_selected",
+                "recipient": "",
+                "subject": "",
+                "email_content": "",
+                "message": "Company not selected for outreach run.",
+            }
+            merged_companies.append(merged)
+
+    final_status = "completed" if sent_count else "partial"
+    done_color = ANSI_GREEN if final_status == "completed" else ANSI_YELLOW
+    print(f"{ANSI_DIM}[pipeline]{ANSI_RESET} {done_color}{ANSI_BOLD}DONE   {ANSI_RESET} Workflow finished with status={final_status}")
+    return {
+        "status": final_status,
+        "send_mode": normalized_send_mode,
+        "icp": icp,
+        "companies": merged_companies,
+        "rankings": rankings,
+        "selected_company_name": processed_company.get("company_name", ""),
+        "summary": {
+            "company_count": len(companies),
+            "emails_sent": sent_count,
+            "emails_failed": 1 - sent_count,
+            "emails_pending_manual": 0,
+            "steps": [{"step": step, "label": label} for step, label in STEP_DEFINITIONS],
+        },
+    }
 
 
-if __name__ == "__main__":
-    # Test the agent
-    test_request = OutreachRequest(
-        icp="We sell high-end cybersecurity training to Series B startups",
-        company="Vercel",
-        recipient_email="test@example.com"
-    )
-    
-    result = run_agent(test_request)
-    print("\n--- Full Response ---")
-    print(f"Signals: {result.signals}")
-    print(f"\nAccount Brief: {result.account_brief}")
-    print(f"\nEmail Subject: {result.email_subject}")
-    print(f"\nEmail Body: {result.email_body}")
-    print(f"\nSent: {result.sent}")
-    print(f"\nSteps: {len(result.steps)}")
+async def run_selected_company_workflow(icp: str, selected_company: dict) -> dict:
+    company_name = str((selected_company or {}).get("company_name", "")).strip()
+    if not company_name:
+        raise ValueError("selected_company.company_name is required.")
+
+    print(f"{ANSI_DIM}[pipeline]{ANSI_RESET} {ANSI_BLUE}{ANSI_BOLD}MANUAL {ANSI_RESET} Running manual company workflow for {company_name}")
+
+    processed_company = await _run_email_and_outreach_for_company(icp=icp, company=selected_company, send_now=False)
+
+    outreach = processed_company.get("outreach", {})
+    outreach["status"] = "manual_pending"
+    outreach["message"] = "Email generated. Review template and click Send Email."
+    processed_company["outreach"] = outreach
+
+    return {
+        "status": "manual_ready",
+        "selected_company": processed_company,
+        "contacts": processed_company.get("contacts", []),
+        "suggested_contact": processed_company.get("suggested_contact", {}),
+        "outreach": processed_company.get("outreach", {}),
+    }
+
+
+async def send_generated_email(recipient: str, subject: str, email_content: str, pdf_filename: str = "") -> dict:
+    """
+    Sends a generated outreach email on manual user action.
+    """
+    print(f"{ANSI_DIM}[pipeline]{ANSI_RESET} {ANSI_YELLOW}{ANSI_BOLD}EMAIL  {ANSI_RESET} Sending manual email to {recipient}")
+    result = await asyncio.to_thread(send_prepared_email, recipient, subject, email_content, pdf_filename)
+    color = ANSI_GREEN if result.get("status") == "sent" else ANSI_RED
+    print(f"{ANSI_DIM}[pipeline]{ANSI_RESET} {color}{ANSI_BOLD}EMAIL  {ANSI_RESET} status={result.get('status')} recipient={recipient}")
+    return result

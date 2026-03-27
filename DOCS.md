@@ -206,3 +206,119 @@ Health check endpoint.
 | Email not sending | Verify Gmail App Password; check 2FA is enabled |
 | OpenAI errors | Check API key; verify model access (gpt-5.4) |
 | CORS errors | Ensure backend is running on port 8000 |
+
+---
+
+## Signal Types (S1-S6)
+
+FireReach harvests 6 distinct signal categories for comprehensive company intelligence:
+
+| Signal | Type | Description | Example Output |
+|--------|------|-------------|----------------|
+| **S1** | Hiring | Job postings from Greenhouse, Lever, LinkedIn | `{ "open_roles": 12, "role_titles": ["Senior Engineer", "Staff SRE"], "seniority_levels": ["Senior", "Staff"] }` |
+| **S2** | Funding | Investment rounds from Crunchbase | `{ "amount_raised": "$150M Series D", "round_type": "Series D", "date": "2024", "investors": [] }` |
+| **S3** | Leadership | Executive changes and new appointments | `{ "changes": [{ "headline": "New CTO appointed", "role_mentioned": "CTO" }] }` |
+| **S4** | Tech Stack | Technologies from StackShare and engineering blogs | `{ "languages": ["Python", "TypeScript"], "frameworks": ["Next.js", "FastAPI"], "cloud_provider": "AWS" }` |
+| **S5** | Role Details | Skills, culture, and urgency from job descriptions | `{ "skills_required": ["React", "Docker"], "culture_hints": ["Remote", "Fast-paced"], "urgency_indicators": ["Rapidly scaling"] }` |
+| **S6** | Contacts | Decision-maker contacts via Hunter.io API | `{ "contacts": [{ "name": "Jane Doe", "email": "j***@company.com", "title": "CTO" }] }` |
+
+Each signal includes `raw_results_count` (number of SerpAPI results found) and `sources` (URLs of matched results).
+
+---
+
+## Signal Verification
+
+After harvesting, a verification layer cross-checks each signal and assigns confidence scores:
+
+### Confidence Scoring Logic (0.0–1.0)
+
+| Condition | Base Score |
+|-----------|-----------|
+| Signal has data + found in 2+ SerpAPI results | **0.9** |
+| Signal has data + found in 1 result | **0.6** |
+| Signal is empty / not found | **0.0** |
+
+### Cross-Verification Boosts
+
+- **S2 (Funding)**: If an additional search for `"{company} funding crunchbase techcrunch"` confirms the funding data → boosted to **0.95**
+- **S1 (Hiring)**: If an additional search for `"{company} hiring glassdoor"` confirms hiring activity → boosted to **0.95**
+
+### Filtering
+
+Signals with confidence **< 0.5** are excluded from the verified set and are not used in email generation.
+
+### Output
+
+```json
+{
+  "company": "Vercel",
+  "verified": { "S1": {...}, "S2": {...}, "S4": {...} },
+  "confidence_scores": { "S1": 0.95, "S2": 0.95, "S3": 0.0, "S4": 0.9, "S5": 0.6, "S6": 0.0 },
+  "top_signal": "S1",
+  "verification_summary": "4/6 signals verified with high confidence. Top signal: S1 (Hiring, 0.95)"
+}
+```
+
+---
+
+## Updated Tool Schemas
+
+### tool_signal_harvester (existing, extended)
+Harvests S1-S6 signals via parallel SerpAPI searches + Hunter.io.
+
+### tool_signal_verifier (NEW)
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "tool_signal_verifier",
+    "description": "Cross-verifies harvested signals across multiple sources and assigns confidence scores 0.0-1.0 to each signal",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "signals": {
+          "type": "object",
+          "description": "The SignalData object returned from tool_signal_harvester"
+        }
+      },
+      "required": ["signals"]
+    }
+  }
+}
+```
+
+### tool_research_analyst (unchanged)
+Analyzes verified signals against ICP and generates account brief.
+
+### tool_outreach_automated_sender (unchanged)
+Writes personalized email and sends via Gmail SMTP.
+
+---
+
+## Updated Agent Flow
+
+```
+User Input (ICP, Company, Email)
+           │
+           ▼
+┌─────────────────────────┐
+│  1. Signal Harvester    │  → SerpAPI searches for S1-S6 + Hunter.io contacts
+└─────────────────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  2. Signal Verifier     │  → Cross-verifies signals, assigns confidence 0.0-1.0
+└─────────────────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  3. Research Analyst    │  → AI analyzes verified signals against ICP
+└─────────────────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  4. Outreach Sender     │  → AI writes email referencing top_signal + sends via SMTP
+└─────────────────────────┘
+```
+
+The agent enforces strict ordering: **Harvest → Verify → Research → Send**. No signal with confidence < 0.5 is used in the final email. The email always leads with the `top_signal` — the signal with the highest verified confidence.

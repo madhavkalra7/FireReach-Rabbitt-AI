@@ -1,7 +1,11 @@
 fastapi
 uvicorn
-openai
-requests
-python-dotenv
 pydantic
-httpx
+python-dotenv
+groq
+requests
+starlette
+sqlalchemy
+PyJWT
+psycopg2-binary
+bcrypt

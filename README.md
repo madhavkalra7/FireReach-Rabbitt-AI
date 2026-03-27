@@ -125,7 +125,8 @@ SENDER_EMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 
 ```bash
 cd backend
-python main.py
+python -m prisma generate --schema=prisma/schema.python
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 API running at `http://localhost:8000`
