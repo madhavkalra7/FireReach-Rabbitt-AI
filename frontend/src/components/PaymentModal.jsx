@@ -8,7 +8,11 @@ export default function PaymentModal({ plan, onClose }) {
   const [step, setStep] = useState(1)
   const [phone, setPhone] = useState('')
   const [otp, setOtp] = useState('')
-  const { updateCredits } = useAuth()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [sessionId, setSessionId] = useState('')
+  const [demoOtpHint, setDemoOtpHint] = useState('')
+  const { API, refreshCredits } = useAuth()
   const navigate = useNavigate()
 
   const isValidPhone = /^\d{10}$/.test(phone)
@@ -34,8 +38,58 @@ export default function PaymentModal({ plan, onClose }) {
     }
   }, [step])
 
-  const handleSuccess = () => {
-    updateCredits(plan.credits)
+  const planCode = (() => {
+    const id = String(plan?.id || '').toLowerCase()
+    if (id === 'starter') return 'STARTER'
+    if (id === 'growth') return 'GROWTH'
+    if (id === 'scale') return 'SCALE'
+    if (id === 'pro') return 'PRO'
+    if (id === 'enterprise') return 'ENTERPRISE'
+    return 'GROWTH'
+  })()
+
+  const handleSendOtp = async () => {
+    if (!isValidPhone || loading) return
+    setLoading(true)
+    setError('')
+    try {
+      const res = await API.post('/api/payments/demo/create', {
+        plan: planCode,
+        phone: `+91${phone}`,
+        frontendBaseUrl: window.location.origin,
+      })
+
+      setSessionId(res.data?.paymentSessionId || '')
+      setDemoOtpHint(res.data?.demoOtp ? `Demo OTP: ${res.data.demoOtp}` : '')
+      setStep(2)
+    } catch (e) {
+      const detail = e.response?.data?.message || e.response?.data?.detail
+      setError(typeof detail === 'string' ? detail : 'Failed to send OTP')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    if (otp.length < 6 || !sessionId || loading) return
+    setLoading(true)
+    setError('')
+    try {
+      await API.post(`/api/payments/demo/${sessionId}/submit`, {
+        phone: `+91${phone}`,
+        paymentCode: otp,
+      })
+      setStep(3)
+    } catch (e) {
+      const detail = e.response?.data?.message || e.response?.data?.detail
+      setError(typeof detail === 'string' ? detail : 'OTP verification failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSuccess = async () => {
+    await refreshCredits()
     onClose()
     navigate('/dashboard')
   }
@@ -72,9 +126,10 @@ export default function PaymentModal({ plan, onClose }) {
                   />
                 </div>
               </div>
-              <button className="btn-primary btn-full" disabled={!isValidPhone} onClick={() => setStep(2)}>
-                Send OTP
+              <button className="btn-primary btn-full" disabled={!isValidPhone || loading} onClick={handleSendOtp}>
+                {loading ? 'Sending...' : 'Send OTP'}
               </button>
+              {error && <p className="error-banner">{error}</p>}
             </motion.div>
           )}
 
@@ -82,6 +137,7 @@ export default function PaymentModal({ plan, onClose }) {
             <motion.div key="s2" className="modal-step" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <h3 className="modal-title">Verify OTP</h3>
               <p className="modal-subtitle">OTP sent to +91{phone}</p>
+              {demoOtpHint && <p className="form-helper">{demoOtpHint}</p>}
               <div className="form-group">
                 <input
                   className="form-input otp-input"
@@ -91,9 +147,10 @@ export default function PaymentModal({ plan, onClose }) {
                   maxLength={6}
                 />
               </div>
-              <button className="btn-primary btn-full" disabled={otp.length < 6} onClick={() => setStep(3)}>
-                Verify OTP
+              <button className="btn-primary btn-full" disabled={otp.length < 6 || loading} onClick={handleVerifyOtp}>
+                {loading ? 'Verifying...' : 'Verify OTP'}
               </button>
+              {error && <p className="error-banner">{error}</p>}
             </motion.div>
           )}
 

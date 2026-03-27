@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 from urllib.parse import urlparse
 
 import requests
@@ -89,8 +90,11 @@ def _domain_from_website(website: str) -> str:
 
     parsed = urlparse(normalized)
     domain = parsed.netloc.lower().strip()
+    domain = domain.split(":", 1)[0].strip()
     if domain.startswith("www."):
         domain = domain[4:]
+    if "." not in domain or " " in domain:
+        return ""
     return domain
 
 
@@ -98,8 +102,9 @@ def _company_logo_from_domain(domain: str) -> str:
     cleaned = str(domain or "").strip().lower()
     if not cleaned:
         return ""
-    # Use logo.dev API for company logos
-    return f"https://logo.dev/api/v1/{cleaned}?size=256&rounded=true"
+    # Root-cause fix: previous logo.dev URL format was invalid for many domains.
+    # Clearbit domain endpoint is stable for direct <img src> usage.
+    return f"https://logo.clearbit.com/{cleaned}"
 
 
 def _company_icon_from_domain(domain: str) -> str:
@@ -189,15 +194,21 @@ Requirements:
         seen_names.add(dedupe_key)
 
         website = _normalize_website(company.get("website", ""))
+        if not _domain_from_website(website):
+            discovered = _discover_company_website(company_name)
+            if discovered:
+                website = discovered
+
+        domain = _domain_from_website(website)
         normalized_companies.append(
             {
                 "company_name": company_name,
                 "industry": str(company.get("industry", "")).strip(),
                 "reason": str(company.get("reason", "")).strip(),
                 "website": website,
-                "domain": _domain_from_website(website),
-                "company_logo": _company_logo_from_domain(_domain_from_website(website)),
-                "company_icon": _company_icon_from_domain(_domain_from_website(website)),
+                "domain": domain,
+                "company_logo": _company_logo_from_domain(domain),
+                "company_icon": _company_icon_from_domain(domain),
             }
         )
 
@@ -280,6 +291,50 @@ def _compact_signals_for_prompt(verified_signals: dict) -> dict:
     return compact
 
 
+def _parse_score_value(value, default: float = 50.0) -> float:
+    if isinstance(value, (int, float)):
+        parsed = float(value)
+    else:
+        text = str(value or "").strip()
+        match = re.search(r"-?\d+(?:\.\d+)?", text)
+        parsed = float(match.group(0)) if match else float(default)
+    return max(0.0, min(100.0, parsed))
+
+
+def _normalize_company_key(name: str) -> str:
+    value = str(name or "").strip().lower()
+    if not value:
+        return ""
+    value = re.sub(r"[^a-z0-9\s]", " ", value)
+    tokens = [token for token in value.split() if token]
+    drop = {
+        "inc", "incorporated", "corp", "corporation", "co", "company",
+        "ltd", "limited", "llc", "plc", "ag", "gmbh", "sa", "nv", "bv",
+        "technologies", "technology", "tech", "systems", "system", "group",
+    }
+    filtered = [token for token in tokens if token not in drop]
+    return " ".join(filtered or tokens)
+
+
+def _extract_scoring_items(raw: str) -> list:
+    try:
+        return _extract_json_array(raw)
+    except Exception:
+        pass
+
+    cleaned = str(raw or "").strip()
+    payload = json.loads(cleaned)
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("scores", "companies", "results", "data", "items"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+
+    raise ValueError("Could not parse scoring payload as JSON array.")
+
+
 def _score_icp_matches_single_call(companies: list, icp: str) -> dict:
     payload = []
     for company in companies:
@@ -321,27 +376,40 @@ Rules:
         max_tokens=1200,
     )
     try:
-        scored = _extract_json_array(raw)
+        scored = _extract_scoring_items(raw)
     except Exception as e:
         print("[LLM SCORING ERROR] Could not parse LLM response:", e)
         print("[LLM RAW RESPONSE]", raw)
-        # Fallback: assign 0 scores, but include raw for debugging
-        return {c.get("company_name", "").strip().lower(): {"icp_score": 0, "reason": f"LLM error: {e}. Raw: {raw}"} for c in companies}
+        # Non-zero deterministic fallback so UI does not collapse to all-zero scores.
+        fallback_map = {}
+        for company in companies:
+            raw_name = str(company.get("company_name", "")).strip()
+            if not raw_name:
+                continue
+            signal_score = _signal_strength_score(company.get("verified_signals", {}))
+            fallback_score = max(35.0, round((signal_score * 0.65) + 25.0, 2))
+            for key in {raw_name.lower(), _normalize_company_key(raw_name)}:
+                if not key:
+                    continue
+                fallback_map[key] = {
+                    "icp_score": fallback_score,
+                    "reason": "Fallback scoring used due temporary LLM parse issue.",
+                }
+        return fallback_map
 
     score_map = {}
     for item in scored:
         name = str(item.get("company_name", "")).strip()
         if not name:
             continue
-        try:
-            icp_score = float(item.get("icp_score", 0))
-        except (TypeError, ValueError):
-            icp_score = 0.0
-        icp_score = max(0.0, min(100.0, icp_score))
-        score_map[name.lower()] = {
+        icp_score = _parse_score_value(item.get("icp_score", 50.0), default=50.0)
+        payload = {
             "icp_score": round(icp_score, 2),
             "reason": str(item.get("reason", "")).strip(),
         }
+        for key in {name.lower(), _normalize_company_key(name)}:
+            if key:
+                score_map[key] = payload
 
     return score_map
 
@@ -358,7 +426,10 @@ def _select_best_company(companies: list, icp: str) -> tuple[list, dict]:
     ranked_rows = []
     for company in companies:
         signal_score = _signal_strength_score(company.get("verified_signals", {}))
-        mapped = icp_score_map.get(str(company.get("company_name", "")).strip().lower(), {})
+        raw_name = str(company.get("company_name", "")).strip()
+        mapped = icp_score_map.get(raw_name.lower(), {})
+        if not mapped:
+            mapped = icp_score_map.get(_normalize_company_key(raw_name), {})
         icp_score = float(mapped.get("icp_score", 50.0))
         final_score = round((signal_score * 0.4) + (icp_score * 0.6), 2)
 
@@ -370,6 +441,7 @@ def _select_best_company(companies: list, icp: str) -> tuple[list, dict]:
                 "signal_score": round(signal_score, 2),
                 "icp_score": round(icp_score, 2),
                 "final_score": final_score,
+                "avg_score": final_score,
                 "score_reason": mapped.get("reason", ""),
             }
         )

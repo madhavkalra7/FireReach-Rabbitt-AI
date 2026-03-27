@@ -14,14 +14,20 @@ JWT_ALGORITHM = "HS256"
 
 PLAN_CONFIG = {
     "FREE": {"monthlyCredits": 30, "amount": 0},
+    "STARTER": {"monthlyCredits": 150, "amount": 299},
+    "GROWTH": {"monthlyCredits": 400, "amount": 599},
+    "SCALE": {"monthlyCredits": 1200, "amount": 1299},
     "PRO": {"monthlyCredits": 2000, "amount": 599},
     "ENTERPRISE": {"monthlyCredits": 9999, "amount": 999},
 }
 
 PLAN_RANK = {
     "FREE": 1,
-    "PRO": 2,
-    "ENTERPRISE": 3,
+    "STARTER": 2,
+    "GROWTH": 3,
+    "PRO": 3,
+    "SCALE": 4,
+    "ENTERPRISE": 4,
 }
 
 
@@ -144,7 +150,7 @@ def sanitize_user(user, subscription: Subscription) -> dict:
         "monthlyCredits": int(subscription.monthlyCredits or 30),
         "creditsRemaining": int(subscription.creditsRemaining or 30),
         "nextResetAt": subscription.nextResetAt,
-        "plus": plan in {"PRO", "ENTERPRISE"},
+        "plus": plan in {"STARTER", "GROWTH", "SCALE", "PRO", "ENTERPRISE"},
         "createdAt": user.createdAt,
         "updatedAt": user.updatedAt,
     }

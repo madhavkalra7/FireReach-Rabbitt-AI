@@ -5,6 +5,7 @@ import Navbar from '../components/Navbar'
 import InputForm from '../components/InputForm'
 import AgentTimeline from '../components/AgentTimeline'
 import CompanyRankCard from '../components/CompanyRankCard'
+import CompanySignalPanel from '../components/CompanySignalPanel'
 import ContactTable from '../components/ContactTable'
 import EmailPreview from '../components/EmailPreview'
 
@@ -130,6 +131,7 @@ export default function Dashboard() {
 
   const handleLaunch = async (formData) => {
     const sendMode = formData.mode === 'automatic' ? 'auto' : 'manual'
+    const creditCost = sendMode === 'auto' ? 10 : 5
     const payload = {
       icp: formData.icp,
       send_mode: sendMode,
@@ -149,7 +151,8 @@ export default function Dashboard() {
 
     try {
       // Deduct credits before running agent
-      await API.post('/api/credits/consume', { amount: 5 })
+      await API.post('/api/credits/consume', { amount: creditCost })
+      await refreshCredits()
 
       const res = await API.post('/run-agent?stream=false', payload)
       const result = res.data || {}
@@ -355,6 +358,20 @@ export default function Dashboard() {
                 </>
               )}
 
+              {orderedCompanies.length > 0 && (
+                <>
+                  <h3 className="section-label">Company Intelligence</h3>
+                  <div className="company-signal-grid">
+                    {orderedCompanies.map((company, index) => (
+                      <CompanySignalPanel
+                        key={`signal-${getCompanyName(company)}-${index}`}
+                        company={company}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
               {selectedCompany && selectedContacts.length > 0 && (
                 <ContactTable
                   contacts={selectedContacts}
@@ -374,6 +391,13 @@ export default function Dashboard() {
               {state.selectionLoading && (
                 <div className="loading-state" style={{ minHeight: '160px' }}>
                   <div className="spinner" />
+                </div>
+              )}
+
+              {!state.selectionLoading && orderedCompanies.length === 0 && selectedContacts.length === 0 && outreach.length === 0 && (
+                <div className="empty-results">
+                  <h4>No results generated yet.</h4>
+                  <p>Try a broader ICP or run again after checking API keys and credits.</p>
                 </div>
               )}
             </div>

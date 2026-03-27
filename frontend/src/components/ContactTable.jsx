@@ -1,12 +1,5 @@
 import { useState } from 'react'
 
-function maskEmail(email) {
-  if (!email) return '—'
-  const [local, domain] = email.split('@')
-  if (!domain) return email
-  return `${local[0]}***@${domain}`
-}
-
 const GENERIC_INBOX_PREFIXES = new Set([
   'info', 'contact', 'hello', 'hi', 'sales', 'support', 'team', 'office', 'admin',
   'careers', 'jobs', 'hr', 'help', 'enquiries', 'inquiries', 'marketing',
@@ -17,7 +10,7 @@ function getContactName(contact) {
 }
 
 function getContactTitle(contact) {
-  return contact.title || contact.role || '—'
+  return contact.title || contact.role || contact.department || '—'
 }
 
 function getContactEmail(contact) {
@@ -55,7 +48,7 @@ export default function ContactTable({ contacts = [], mode = 'manual', onSend, c
             <tr>
               {mode === 'manual' && <th></th>}
               <th>Name</th>
-              <th>Title</th>
+              <th>Role</th>
               <th>Email</th>
               <th>Phone</th>
               <th>Type</th>
@@ -82,7 +75,7 @@ export default function ContactTable({ contacts = [], mode = 'manual', onSend, c
                 )}
                 <td className="td-name">{getContactName(c)}</td>
                 <td className="td-title">{getContactTitle(c)}</td>
-                <td className="td-email mono">{maskEmail(email)}</td>
+                <td className="td-email mono">{email || '—'}</td>
                 <td className="td-phone mono">{c.phone || '—'}</td>
                 <td>
                   <span className={`type-badge ${isPersonal ? 'type-personal' : 'type-org'}`}>
