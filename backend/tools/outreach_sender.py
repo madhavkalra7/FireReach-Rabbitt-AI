@@ -4,7 +4,7 @@ import re
 import time
 
 from services.email_service import send_email
-from services.groq_client import generate_completion
+from services.openai_client import generate_completion
 
 
 def _extract_company_signal(signals: dict) -> str:
@@ -226,7 +226,7 @@ def _try_generate_email_payload(
     recipient_role: str,
 ) -> tuple[dict, str | None]:
     """
-    Generates outreach payload via Groq; retries briefly on rate-limit and falls back to deterministic template.
+    Generates outreach payload via OpenAI; retries briefly on rate-limit and falls back to deterministic template.
     """
     max_attempts = 2
     last_error = None
@@ -264,7 +264,7 @@ def _try_generate_email_payload(
         research_brief,
         recipient_role,
     )
-    return fallback_payload, str(last_error) if last_error else "Unknown Groq error"
+    return fallback_payload, str(last_error) if last_error else "Unknown OpenAI error"
 
 
 def _resolve_pitch_path(pdf_filename: str) -> str:

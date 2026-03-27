@@ -1,5 +1,5 @@
 import json
-from services.groq_client import generate_completion
+from services.openai_client import generate_completion
 
 def tool_research_analyst(icp: str, signals: dict, company_name: str = "") -> str:
     """

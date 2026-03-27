@@ -2,7 +2,7 @@ fastapi
 uvicorn
 pydantic
 python-dotenv
-groq
+openai
 requests
 starlette
 sqlalchemy

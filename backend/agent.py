@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from services.groq_client import generate_completion
+from services.openai_client import generate_completion
 from services.signal_verifier import verify_signals
 from tools.email_finder import tool_email_finder
 from tools.outreach_sender import send_prepared_email

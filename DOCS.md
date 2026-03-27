@@ -1,324 +1,260 @@
-# FireReach Documentation
+# FireReach Technical Documentation
 
-## Overview
+This document reflects the current production architecture of FireReach (7-agent runtime, stream-first UX, OpenAI integration, credits, and OTP payments).
 
-FireReach is an autonomous B2B outreach engine that uses AI to research companies and send personalized cold emails.
+## 1. Product Overview
 
-## Deployment Note
+FireReach is an AI outbound pipeline that turns a single ICP input into ranked target companies, contact candidates, and personalized outreach.
 
-**Important**: The application works perfectly on localhost. However, when deploying to **Vercel + Render free tier**, Gmail SMTP is blocked by the hosting providers.
+Primary operating modes:
 
-**Solutions**:
-1. **Deploy on Railway** - Railway does not block SMTP outbound connections
-2. **Use SendGrid API** - Replace Gmail SMTP with SendGrid email API
+- `manual`: user selects company, reviews and edits draft, then sends
+- `auto`: system selects top-ranked company and sends directly
 
----
+Credit usage:
 
-## How It Works
+- `manual`: 5 credits
+- `auto`: 10 credits
 
+## 2. High-Level Architecture
+
+```text
+Frontend (React + Vite)
+  -> Auth, Credits, Campaign Form, Timeline, 3D Runtime Panel
+  -> Calls FastAPI endpoints
+
+Backend (FastAPI)
+  -> Auth + Subscription + Payments + History
+  -> 7-step agent workflow
+  -> Streams NDJSON step events to frontend
+
+Integrations
+  -> OpenAI (analysis and scoring)
+  -> Search/signal providers
+  -> SMTP email sending
+  -> Optional Twilio SMS for OTP delivery
 ```
-User Input (ICP, Company, Email)
-           │
-           ▼
-┌─────────────────────────┐
-│  1. Signal Harvester    │  → SerpAPI searches for funding, hiring, news
-└─────────────────────────┘
-           │
-           ▼
-┌─────────────────────────┐
-│  2. Research Analyst    │  → AI analyzes signals against ICP
-└─────────────────────────┘
-           │
-           ▼
-┌─────────────────────────┐
-│  3. Outreach Sender     │  → AI writes email + sends via SMTP
-└─────────────────────────┘
-```
 
----
+## 3. Seven Agent Steps
 
-## API Endpoint
+Internal workflow in `backend/agent.py`:
 
-**POST** `/api/outreach`
+1. `step1` Company discovery
+2. `step2` Signal harvesting
+3. `step3` Signal verification
+4. `step4` Research brief generation
+5. `step5` ICP + signal scoring and ranking
+6. `step6` Contact discovery + suggested contact selection
+7. `step7` Outreach generation and send outcome
+
+The backend emits step updates with message + status while processing.
+
+## 4. Runtime Stream Contract
+
+Endpoint: `POST /run-agent?stream=true`
+
+Response media type: `application/x-ndjson`
+
+Event types:
+
+- `step`
+- `result`
+- `error`
+
+Step event example:
 
 ```json
 {
-  "icp": "Your ideal customer profile",
-  "company": "Target company name",
-  "recipient_email": "email@example.com"
+  "type": "step",
+  "step": "step4",
+  "status": "in-progress",
+  "message": "Generating account briefs from verified signals."
 }
 ```
 
----
-
-## Environment Variables
-
-```
-OPENAI_API_KEY=your_openai_key
-SERPAPI_KEY=your_serpapi_key
-SENDER_EMAIL=your_gmail@gmail.com
-SENDER_EMAIL_APP_PASSWORD=your_app_password
-```
-
----
-
-## How to Run
-
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- Gmail account with App Password enabled
-- OpenAI API key
-- SerpAPI key
-
-### Step 1: Clone and Setup Backend
-
-```bash
-# Navigate to backend directory
-cd firereach/backend
-
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Step 2: Configure Environment Variables
-
-Create a `.env` file in the `backend/` directory:
-
-```env
-OPENAI_API_KEY=sk-your-openai-api-key
-SERP_API_KEY=your-serpapi-key
-SENDER_EMAIL=your-gmail@gmail.com
-SENDER_EMAIL_APP_PASSWORD=your-16-char-app-password
-```
-
-**Getting API Keys:**
-
-1. **OpenAI API Key**: https://platform.openai.com/api-keys
-2. **SerpAPI Key**: https://serpapi.com/manage-api-key
-3. **Gmail App Password**: 
-   - Go to Google Account → Security → 2-Step Verification
-   - At the bottom, click "App passwords"
-   - Generate a new app password for "Mail"
-
-### Step 3: Start Backend Server
-
-```bash
-# From backend directory
-python main.py
-# or
-uvicorn main:app --reload --port 8000
-```
-
-The API will be available at `http://localhost:8000`
-
-### Step 4: Setup Frontend
-
-```bash
-# Navigate to frontend directory
-cd ../frontend
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-The frontend will be available at `http://localhost:5173`
-
-### Step 5: Test the System
-
-1. Open `http://localhost:5173` in your browser
-2. Enter your ICP (e.g., "We sell cybersecurity training to Series B startups")
-3. Enter a target company (e.g., "Vercel")
-4. Enter recipient email
-5. Click "Launch Agent →"
-6. Watch the agent harvest signals, analyze, and send!
-
----
-
-## API Reference
-
-### POST /api/outreach
-
-Execute the full outreach pipeline.
-
-**Request Body**:
-```json
-{
-  "icp": "We sell cybersecurity training to Series B startups",
-  "company": "Vercel",
-  "recipient_email": "john@example.com"
-}
-```
-
-**Response**:
-```json
-{
-  "signals": {
-    "company": "Vercel",
-    "funding": "...",
-    "hiring": "...",
-    "news": ["...", "..."],
-    "tech_stack": ["...", "..."]
-  },
-  "account_brief": "...",
-  "email_subject": "...",
-  "email_body": "...",
-  "sent": true,
-  "steps": [
-    {"tool_name": "tool_signal_harvester", "status": "completed", "result": {...}},
-    {"tool_name": "tool_research_analyst", "status": "completed", "result": {...}},
-    {"tool_name": "tool_outreach_automated_sender", "status": "completed", "result": {...}}
-  ]
-}
-```
-
-### GET /api/health
-
-Health check endpoint.
-
-**Response**:
-```json
-{
-  "status": "ok"
-}
-```
-
----
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| SerpAPI returns empty | Check API key; verify quota not exceeded |
-| Email not sending | Verify Gmail App Password; check 2FA is enabled |
-| OpenAI errors | Check API key; verify model access (gpt-5.4) |
-| CORS errors | Ensure backend is running on port 8000 |
-
----
-
-## Signal Types (S1-S6)
-
-FireReach harvests 6 distinct signal categories for comprehensive company intelligence:
-
-| Signal | Type | Description | Example Output |
-|--------|------|-------------|----------------|
-| **S1** | Hiring | Job postings from Greenhouse, Lever, LinkedIn | `{ "open_roles": 12, "role_titles": ["Senior Engineer", "Staff SRE"], "seniority_levels": ["Senior", "Staff"] }` |
-| **S2** | Funding | Investment rounds from Crunchbase | `{ "amount_raised": "$150M Series D", "round_type": "Series D", "date": "2024", "investors": [] }` |
-| **S3** | Leadership | Executive changes and new appointments | `{ "changes": [{ "headline": "New CTO appointed", "role_mentioned": "CTO" }] }` |
-| **S4** | Tech Stack | Technologies from StackShare and engineering blogs | `{ "languages": ["Python", "TypeScript"], "frameworks": ["Next.js", "FastAPI"], "cloud_provider": "AWS" }` |
-| **S5** | Role Details | Skills, culture, and urgency from job descriptions | `{ "skills_required": ["React", "Docker"], "culture_hints": ["Remote", "Fast-paced"], "urgency_indicators": ["Rapidly scaling"] }` |
-| **S6** | Contacts | Decision-maker contacts via Hunter.io API | `{ "contacts": [{ "name": "Jane Doe", "email": "j***@company.com", "title": "CTO" }] }` |
-
-Each signal includes `raw_results_count` (number of SerpAPI results found) and `sources` (URLs of matched results).
-
----
-
-## Signal Verification
-
-After harvesting, a verification layer cross-checks each signal and assigns confidence scores:
-
-### Confidence Scoring Logic (0.0–1.0)
-
-| Condition | Base Score |
-|-----------|-----------|
-| Signal has data + found in 2+ SerpAPI results | **0.9** |
-| Signal has data + found in 1 result | **0.6** |
-| Signal is empty / not found | **0.0** |
-
-### Cross-Verification Boosts
-
-- **S2 (Funding)**: If an additional search for `"{company} funding crunchbase techcrunch"` confirms the funding data → boosted to **0.95**
-- **S1 (Hiring)**: If an additional search for `"{company} hiring glassdoor"` confirms hiring activity → boosted to **0.95**
-
-### Filtering
-
-Signals with confidence **< 0.5** are excluded from the verified set and are not used in email generation.
-
-### Output
+Final event example:
 
 ```json
 {
-  "company": "Vercel",
-  "verified": { "S1": {...}, "S2": {...}, "S4": {...} },
-  "confidence_scores": { "S1": 0.95, "S2": 0.95, "S3": 0.0, "S4": 0.9, "S5": 0.6, "S6": 0.0 },
-  "top_signal": "S1",
-  "verification_summary": "4/6 signals verified with high confidence. Top signal: S1 (Hiring, 0.95)"
-}
-```
-
----
-
-## Updated Tool Schemas
-
-### tool_signal_harvester (existing, extended)
-Harvests S1-S6 signals via parallel SerpAPI searches + Hunter.io.
-
-### tool_signal_verifier (NEW)
-```json
-{
-  "type": "function",
-  "function": {
-    "name": "tool_signal_verifier",
-    "description": "Cross-verifies harvested signals across multiple sources and assigns confidence scores 0.0-1.0 to each signal",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "signals": {
-          "type": "object",
-          "description": "The SignalData object returned from tool_signal_harvester"
-        }
-      },
-      "required": ["signals"]
-    }
+  "type": "result",
+  "data": {
+    "status": "completed",
+    "send_mode": "auto",
+    "companies": [],
+    "rankings": [],
+    "selected_company_name": "",
+    "summary": {}
   }
 }
 ```
 
-### tool_research_analyst (unchanged)
-Analyzes verified signals against ICP and generates account brief.
+Frontend maps `step1..step7` to timeline and 3D serial execution track.
 
-### tool_outreach_automated_sender (unchanged)
-Writes personalized email and sends via Gmail SMTP.
+## 5. Scoring and Ranking
 
----
+Per company:
 
-## Updated Agent Flow
+- `signal_score`: weighted score from verified signal categories
+- `icp_score`: OpenAI-based score against ICP
+- `final_score`: blended score (`0.4 * signal_score + 0.6 * icp_score`)
+- `avg_score`: mirrored final score for UI cards
 
+Resilience logic:
+
+- Robust extraction/parsing of model JSON
+- Name normalization for ranking merge consistency
+- Non-zero deterministic fallback when model payload is malformed
+
+## 6. Contact and Outreach Flow
+
+After ranking:
+
+- `auto` mode:
+  - selects rank-1 company
+  - finds contacts
+  - generates and attempts send
+- `manual` mode:
+  - returns ranked list and waits for user selection
+  - `/select-company` generates contacts and outreach draft
+  - `/send-email` executes final send
+
+Frontend supports draft editing before manual send.
+
+## 7. Auth, Credits, Plans, and Payments
+
+### Auth routes
+
+- `POST /api/auth/signup`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `PATCH /api/auth/me`
+
+### Credits routes
+
+- `GET /api/credits`
+- `POST /api/credits/consume`
+
+### Payment routes (demo OTP)
+
+- `POST /api/payments/demo/create`
+- `GET /api/payments/demo/{payment_id}`
+- `POST /api/payments/demo/{payment_id}/submit`
+- `GET /api/payments/demo/{payment_id}/status`
+
+Plans currently accepted in payment flow include `STARTER`, `GROWTH`, `SCALE`, `PRO`, and `ENTERPRISE`.
+
+OTP behavior:
+
+- generated server-side with TTL
+- validated on submit
+- debug OTP can be returned when SMS provider is not configured
+- optional Twilio SMS if credentials are present
+
+## 8. History
+
+History routes:
+
+- `POST /api/history`
+- `GET /api/history`
+- `GET /api/history/{history_id}`
+- `PATCH /api/history/{history_id}`
+- `DELETE /api/history/{history_id}`
+
+Stored payload includes ICP, mode, optional target/test recipient, and full workflow result snapshot.
+
+## 9. Frontend UX Notes
+
+Dashboard runtime states:
+
+- `idle`
+- `running`
+- `select_company`
+- `done`
+
+While running:
+
+- Three.js serial pipeline advances only as stream events arrive
+- status text mirrors backend step messages
+- timeline and runtime mesh stay in sync
+
+Result views include:
+
+- ranked company cards with `avg_score`
+- per-company intelligence/signal panels
+- full contact table with unmasked email
+- editable email preview and send controls
+
+## 10. Environment Variables
+
+Required:
+
+```env
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5.4-mini-2026-03-17
+SERPER_API_KEY=...
+SENDER_EMAIL=...
+SENDER_EMAIL_APP_PASSWORD=...
+JWT_SECRET=...
 ```
-User Input (ICP, Company, Email)
-           │
-           ▼
-┌─────────────────────────┐
-│  1. Signal Harvester    │  → SerpAPI searches for S1-S6 + Hunter.io contacts
-└─────────────────────────┘
-           │
-           ▼
-┌─────────────────────────┐
-│  2. Signal Verifier     │  → Cross-verifies signals, assigns confidence 0.0-1.0
-└─────────────────────────┘
-           │
-           ▼
-┌─────────────────────────┐
-│  3. Research Analyst    │  → AI analyzes verified signals against ICP
-└─────────────────────────┘
-           │
-           ▼
-┌─────────────────────────┐
-│  4. Outreach Sender     │  → AI writes email referencing top_signal + sends via SMTP
-└─────────────────────────┘
+
+Optional:
+
+```env
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM_NUMBER=
+DEMO_OTP_DEBUG=true
+DEMO_OTP_TTL_MINUTES=5
+CORS_ORIGINS=http://localhost:5173
 ```
 
-The agent enforces strict ordering: **Harvest → Verify → Research → Send**. No signal with confidence < 0.5 is used in the final email. The email always leads with the `top_signal` — the signal with the highest verified confidence.
+## 11. Local Runbook
+
+Backend:
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Suggested ICP test:
+
+```text
+We sell cybersecurity training to Series B startups
+```
+
+## 12. Deployment Notes
+
+- Localhost is the most reliable baseline for full pipeline testing.
+- Some free-tier hosts block outbound SMTP.
+- Recommended production options:
+  - SMTP-friendly host (for example Railway), or
+  - provider API based delivery integration for email sending.
+
+## 13. Common Failure Cases
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| All company scores show 0 | ranking mapping issue or parse fallback not applied | verify `rankings` merge and `avg_score` in API response |
+| OTP not arriving | Twilio not configured or phone invalid | use debug OTP from response or set Twilio env vars |
+| Campaign fails at start | credits exhausted | check `/api/credits` and top up plan |
+| OpenAI call errors | invalid key/model access | verify key and model permissions |
+| Email send fails in cloud | SMTP blocked by host | move host or switch email provider API |
+
+## 14. Extension Points
+
+- Replace SMTP sender with API-based transactional provider
+- Add websocket transport for richer realtime telemetry
+- Persist step-level logs for replayable campaign sessions
+- Add multi-company auto send with safety throttling

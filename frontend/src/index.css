@@ -361,7 +361,17 @@ input, textarea { font-family: inherit; }
 .step-line { width: 2px; height: 24px; background: var(--border); }
 .step-content { padding-bottom: 20px; }
 .step-header { display: flex; align-items: center; gap: 8px; }
-.step-icon { font-size: 1rem; }
+.step-icon {
+  font-size: 0.66rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d8e2ff;
+  border: 1px solid rgba(106, 127, 190, 0.45);
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: rgba(41, 57, 97, 0.35);
+}
 .step-name { font-weight: 500; font-size: 0.9rem; }
 .step-desc { font-size: 0.8rem; color: var(--text-dim); margin-top: 2px; }
 .step-done .step-name { color: var(--success); }
@@ -859,6 +869,119 @@ input, textarea { font-family: inherit; }
 .loading-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; margin-top: 20px; }
 .loading-text { color: var(--text-muted); margin-top: 8px; }
 
+/* 3D pipeline visual */
+.pipeline3d-wrap {
+  width: 100%;
+  max-width: 760px;
+  min-height: 360px;
+  border: 1px solid rgba(94, 107, 160, 0.4);
+  border-radius: 20px;
+  padding: 14px 14px 12px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(76, 107, 255, 0.15), transparent 34%),
+    radial-gradient(circle at 90% 0%, rgba(255, 124, 62, 0.16), transparent 32%),
+    linear-gradient(180deg, rgba(10, 12, 24, 0.98), rgba(7, 9, 18, 0.96));
+  box-shadow: 0 22px 52px rgba(4, 7, 18, 0.45);
+  margin-bottom: 12px;
+}
+
+.pipeline3d-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+
+.pipeline3d-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #90a8ff;
+}
+
+.pipeline3d-meta {
+  font-size: 0.78rem;
+  color: #ffd2b3;
+  border: 1px solid rgba(255, 140, 74, 0.45);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(255, 123, 61, 0.1);
+}
+
+.pipeline3d-scene {
+  width: 100%;
+  height: 220px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(76, 98, 164, 0.32);
+  background: #05070f;
+}
+
+.pipeline3d-track {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pipeline3d-stage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(73, 87, 129, 0.5);
+  padding: 7px 8px;
+  background: rgba(26, 33, 56, 0.5);
+  min-width: 0;
+}
+
+.pipeline3d-stage .stage-index {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: rgba(184, 198, 238, 0.12);
+  color: #dde6ff;
+  flex-shrink: 0;
+}
+
+.pipeline3d-stage .stage-label {
+  font-size: 0.7rem;
+  color: #c8d2f2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline3d-stage.is-running {
+  border-color: rgba(255, 145, 84, 0.78);
+  background: rgba(255, 119, 48, 0.18);
+  box-shadow: 0 0 18px rgba(255, 119, 48, 0.22);
+}
+
+.pipeline3d-stage.is-completed {
+  border-color: rgba(58, 204, 136, 0.72);
+  background: rgba(30, 148, 97, 0.17);
+}
+
+.pipeline3d-stage.is-failed {
+  border-color: rgba(255, 77, 108, 0.72);
+  background: rgba(173, 18, 56, 0.2);
+}
+
+.pipeline3d-message {
+  margin-top: 10px;
+  margin-bottom: 0;
+  font-size: 0.86rem;
+  color: #c0caec;
+  min-height: 20px;
+}
+
 /* Diamond video */
 .diamond-container { width: 290px; height: 290px; position: relative; }
 .diamond-video { width: 100%; height: 100%; object-fit: contain; }
@@ -1297,9 +1420,12 @@ input, textarea { font-family: inherit; }
   .score-bars { grid-template-columns: 1fr; }
   .verification-grid { grid-template-columns: 1fr; }
   .robot-cutout { width: 120px; height: 120px; right: 8px; bottom: 8px; }
+  .pipeline3d-wrap { min-height: 350px; }
+  .pipeline3d-track { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 @media (max-width: 480px) {
   .signals-grid-landing { grid-template-columns: 1fr; }
   .agent-left, .agent-right { align-self: stretch; }
+  .pipeline3d-track { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

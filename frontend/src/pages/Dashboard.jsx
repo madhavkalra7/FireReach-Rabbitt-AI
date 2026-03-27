@@ -4,6 +4,7 @@ import { useCredits } from '../hooks/useCredits'
 import Navbar from '../components/Navbar'
 import InputForm from '../components/InputForm'
 import AgentTimeline from '../components/AgentTimeline'
+import Pipeline3D from '../components/Pipeline3D'
 import CompanyRankCard from '../components/CompanyRankCard'
 import CompanySignalPanel from '../components/CompanySignalPanel'
 import ContactTable from '../components/ContactTable'
@@ -24,6 +25,136 @@ const COMPLETED_STEPS = DEFAULT_STEPS.map((step) => ({
   status: 'completed',
 }))
 
+const MANUAL_READY_STEPS = DEFAULT_STEPS.map((step, index) => ({
+  ...step,
+  status: index < 5 ? 'completed' : 'pending',
+}))
+
+const STEP_TO_TOOL = {
+  step1: 'agent1_discovery',
+  step2: 'agent2_signals',
+  step3: 'agent3_verifier',
+  step4: 'agent4_scorer',
+  step5: 'agent5_ranker',
+  step6: 'agent6_contacts',
+  step7: 'agent7_outreach',
+}
+
+function cloneSteps(steps = DEFAULT_STEPS) {
+  return steps.map((step) => ({ ...step, result: step.result || {} }))
+}
+
+function applyStreamStep(steps, event) {
+  const nextSteps = cloneSteps(steps && steps.length ? steps : DEFAULT_STEPS)
+  const toolName = STEP_TO_TOOL[event?.step]
+  if (!toolName) return nextSteps
+
+  const stepIndex = nextSteps.findIndex((step) => step.tool_name === toolName)
+  if (stepIndex < 0) return nextSteps
+
+  if (event.status === 'in-progress') {
+    return nextSteps.map((step, index) => {
+      if (index < stepIndex && step.status === 'pending') return { ...step, status: 'completed' }
+      if (index === stepIndex) return { ...step, status: 'running' }
+      if (index > stepIndex && step.status !== 'failed' && step.status !== 'completed') return { ...step, status: 'pending' }
+      return step
+    })
+  }
+
+  if (event.status === 'completed') {
+    nextSteps[stepIndex] = { ...nextSteps[stepIndex], status: 'completed' }
+    return nextSteps
+  }
+
+  if (event.status === 'failed') {
+    nextSteps[stepIndex] = { ...nextSteps[stepIndex], status: 'failed' }
+    return nextSteps
+  }
+
+  return nextSteps
+}
+
+async function runAgentStream({ API, payload, onEvent }) {
+  const token = localStorage.getItem('fr_token')
+  const res = await fetch(`${API.defaults.baseURL}/run-agent?stream=true`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    let message = `Campaign failed (${res.status})`
+    try {
+      const body = await res.json()
+      const detail = body?.detail || body?.message
+      if (typeof detail === 'string' && detail.trim()) message = detail
+      else if (typeof detail === 'object') message = detail.message || detail.error || message
+    } catch {
+      // Ignore parse errors and keep default message.
+    }
+    throw new Error(message)
+  }
+
+  if (!res.body) throw new Error('Streaming not supported by this browser.')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalResult = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      const chunk = line.trim()
+      if (!chunk) continue
+
+      let event
+      try {
+        event = JSON.parse(chunk)
+      } catch {
+        continue
+      }
+
+      onEvent?.(event)
+
+      if (event.type === 'result') {
+        finalResult = event.data || {}
+      }
+
+      if (event.type === 'error') {
+        throw new Error(event.message || 'Campaign failed')
+      }
+    }
+  }
+
+  const tail = buffer.trim()
+  if (tail) {
+    try {
+      const event = JSON.parse(tail)
+      onEvent?.(event)
+      if (event.type === 'result') finalResult = event.data || {}
+      if (event.type === 'error') throw new Error(event.message || 'Campaign failed')
+    } catch {
+      // Ignore malformed trailing chunks.
+    }
+  }
+
+  if (!finalResult) {
+    throw new Error('Agent stream ended without a final result.')
+  }
+
+  return finalResult
+}
+
 function getCompanyName(company) {
   return company.company_name || company.company || company.name || 'Unknown Company'
 }
@@ -33,12 +164,33 @@ function getCompanyRank(company, index = 0) {
 }
 
 function getCompanyOrder(companies = [], rankings = []) {
-  const rankingMap = new Map(rankings.map((row, index) => [row.company_name || row.company || row.name, Number(row.rank || index + 1)]))
-  return [...companies].sort((a, b) => {
-    const left = rankingMap.get(getCompanyName(a)) || getCompanyRank(a)
-    const right = rankingMap.get(getCompanyName(b)) || getCompanyRank(b)
-    return left - right
-  })
+  const normalizeName = (value) => String(value || '').trim().toLowerCase()
+
+  const rankingMap = new Map(
+    rankings.map((row, index) => [
+      normalizeName(row.company_name || row.company || row.name),
+      {
+        rank: Number(row.rank || index + 1),
+        signal_score: row.signal_score,
+        icp_score: row.icp_score,
+        final_score: row.final_score,
+        avg_score: row.avg_score ?? row.final_score,
+        score_reason: row.score_reason,
+      },
+    ])
+  )
+
+  return [...companies]
+    .map((company, index) => {
+      const key = normalizeName(getCompanyName(company))
+      const ranking = rankingMap.get(key) || {}
+      return {
+        ...company,
+        ...ranking,
+        rank: Number(ranking.rank || company.rank || index + 1),
+      }
+    })
+    .sort((a, b) => Number(a.rank || 999) - Number(b.rank || 999))
 }
 
 function normalizeOutreach(result, selectedCompany = null) {
@@ -101,6 +253,7 @@ export default function Dashboard() {
     mode: 'manual',
     selectionLoading: false,
     sendingLoading: false,
+    liveMessage: '',
   })
 
   const saveHistory = async (workflow) => {
@@ -117,15 +270,16 @@ export default function Dashboard() {
     }
   }
 
-  const setDoneState = (workflow) => {
+  const setDoneState = (workflow, stepsOverride = COMPLETED_STEPS) => {
     setState({
       phase: 'done',
-      steps: COMPLETED_STEPS,
+      steps: cloneSteps(stepsOverride),
       workflow,
       error: null,
       mode: workflow.send_mode || 'manual',
       selectionLoading: false,
       sendingLoading: false,
+      liveMessage: '',
     })
   }
 
@@ -147,6 +301,7 @@ export default function Dashboard() {
       mode: sendMode,
       selectionLoading: false,
       sendingLoading: false,
+      liveMessage: 'Booting agent graph...',
     })
 
     try {
@@ -154,8 +309,19 @@ export default function Dashboard() {
       await API.post('/api/credits/consume', { amount: creditCost })
       await refreshCredits()
 
-      const res = await API.post('/run-agent?stream=false', payload)
-      const result = res.data || {}
+      const result = await runAgentStream({
+        API,
+        payload,
+        onEvent: (event) => {
+          if (event.type !== 'step') return
+          setState((prev) => ({
+            ...prev,
+            steps: applyStreamStep(prev.steps, event),
+            liveMessage: event.message || prev.liveMessage,
+          }))
+        },
+      })
+
       const workflow = {
         ...result,
         ...payload,
@@ -169,12 +335,13 @@ export default function Dashboard() {
       if (sendMode === 'manual' && result.status === 'awaiting_company_selection') {
         setState({
           phase: 'select_company',
-          steps: COMPLETED_STEPS,
+          steps: cloneSteps(MANUAL_READY_STEPS),
           workflow,
           error: null,
           mode: sendMode,
           selectionLoading: false,
           sendingLoading: false,
+          liveMessage: '',
         })
         return
       }
@@ -183,8 +350,8 @@ export default function Dashboard() {
       refreshCredits()
       await saveHistory(workflow)
     } catch (err) {
-      const detail = err.response?.data?.detail || err.response?.data?.message
-      const msg = typeof detail === 'object' ? detail.message || detail.error : detail || 'Campaign failed'
+      const detail = err?.response?.data?.detail || err?.response?.data?.message
+      const msg = err?.message || (typeof detail === 'object' ? detail.message || detail.error : detail) || 'Campaign failed'
       setState((prev) => ({ ...prev, phase: 'idle', error: msg }))
     }
   }
@@ -271,6 +438,7 @@ export default function Dashboard() {
       mode: 'manual',
       selectionLoading: false,
       sendingLoading: false,
+      liveMessage: '',
     })
   }
 
@@ -301,7 +469,7 @@ export default function Dashboard() {
 
           {state.error && <div className="error-box">⚠️ {state.error}</div>}
 
-          {(state.phase === 'running' || state.phase === 'done' || state.phase === 'select_company') && (
+          {(state.phase === 'done' || state.phase === 'select_company') && (
             <AgentTimeline steps={state.steps} />
           )}
         </aside>
@@ -321,12 +489,13 @@ export default function Dashboard() {
 
           {state.phase === 'running' && (
             <div className="loading-state">
+              <Pipeline3D steps={state.steps} message={state.liveMessage} />
               <div className="diamond-container">
                 <video className="diamond-video" src="/diamond.mp4" autoPlay loop muted playsInline />
                 <div className="diamond-glow active" />
               </div>
               <h2 className="loading-title">Agents Working</h2>
-              <p className="loading-text">Running 7-agent pipeline on your ICP...</p>
+              <p className="loading-text">{state.liveMessage || 'Running 7-agent pipeline on your ICP...'}</p>
             </div>
           )}
 

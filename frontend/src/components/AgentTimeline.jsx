@@ -1,11 +1,11 @@
 const AGENT_INFO = {
-  agent1_discovery: { icon: '🎯', name: 'Company Discovery', desc: 'Finding best-fit companies' },
-  agent2_signals: { icon: '📡', name: 'Signal Harvesting', desc: 'Pulling 6 signal types' },
-  agent3_verifier: { icon: '✅', name: 'Signal Verification', desc: 'Cross-checking accuracy' },
-  agent4_scorer: { icon: '🏆', name: 'ICP Scoring', desc: 'Scoring 0-100 for fit' },
-  agent5_ranker: { icon: '🥇', name: 'Company Ranking', desc: 'Ranking top targets' },
-  agent6_contacts: { icon: '👥', name: 'Contact Finding', desc: 'Finding decision makers' },
-  agent7_outreach: { icon: '📧', name: 'Outreach Generation', desc: 'Writing personalized emails' },
+  agent1_discovery: { icon: 'A1', name: 'Company Discovery', desc: 'Finding best-fit companies' },
+  agent2_signals: { icon: 'A2', name: 'Signal Harvesting', desc: 'Pulling 6 signal types' },
+  agent3_verifier: { icon: 'A3', name: 'Signal Verification', desc: 'Cross-checking accuracy' },
+  agent4_scorer: { icon: 'A4', name: 'ICP Scoring', desc: 'Scoring 0-100 for fit' },
+  agent5_ranker: { icon: 'A5', name: 'Company Ranking', desc: 'Ranking top targets' },
+  agent6_contacts: { icon: 'A6', name: 'Contact Finding', desc: 'Finding decision makers' },
+  agent7_outreach: { icon: 'A7', name: 'Outreach Generation', desc: 'Writing personalized emails' },
 }
 
 export default function AgentTimeline({ steps = [] }) {
@@ -14,7 +14,7 @@ export default function AgentTimeline({ steps = [] }) {
       <h3 className="card-title">Agent Pipeline</h3>
       <div className="timeline">
         {steps.map((step, i) => {
-          const info = AGENT_INFO[step.tool_name] || { icon: '⚙️', name: step.tool_name, desc: '' }
+          const info = AGENT_INFO[step.tool_name] || { icon: 'AX', name: step.tool_name, desc: '' }
           const isDone = step.status === 'done' || step.status === 'completed'
           const isRunning = step.status === 'running'
           const isPending = step.status === 'pending'
